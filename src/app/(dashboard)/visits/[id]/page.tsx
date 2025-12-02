@@ -17,7 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import Link from 'next/link';
 
-interface VisitDetails extends MaintenanceVisit {
+interface VisitDetails extends Omit<MaintenanceVisit, 'routine' | 'vendor_coordinator' | 'maintenance_engineer' | 'technical_engineer'> {
   routine: {
     id: string;
     plan_number: string;
@@ -29,7 +29,7 @@ interface VisitDetails extends MaintenanceVisit {
   technical_engineer: { id: string; full_name: string; email: string };
 }
 
-interface RecommendationWithCreator extends Recommendation {
+interface RecommendationWithCreator extends Omit<Recommendation, 'created_by' | 'reviewed_by'> {
   created_by: { full_name: string };
   reviewed_by?: { full_name: string } | null;
 }

@@ -65,9 +65,10 @@ interface TableCellProps {
   children: ReactNode;
   className?: string;
   align?: 'left' | 'center' | 'right';
+  colSpan?: number;
 }
 
-export function TableCell({ children, className = '', align = 'left' }: TableCellProps) {
+export function TableCell({ children, className = '', align = 'left', colSpan }: TableCellProps) {
   const alignClass = {
     left: 'text-left',
     center: 'text-center',
@@ -75,7 +76,7 @@ export function TableCell({ children, className = '', align = 'left' }: TableCel
   };
 
   return (
-    <td className={`px-6 py-4 whitespace-nowrap text-sm text-gray-900 ${alignClass[align]} ${className}`}>
+    <td colSpan={colSpan} className={`px-6 py-4 whitespace-nowrap text-sm text-gray-900 ${alignClass[align]} ${className}`}>
       {children}
     </td>
   );

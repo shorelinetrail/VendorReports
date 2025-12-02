@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import Link from 'next/link';
 
-interface TaskWithDetails extends Task {
+interface TaskWithDetails extends Omit<Task, 'visit' | 'assigned_to'> {
   visit: {
     id: string;
     scheduled_date: string;
@@ -144,7 +144,7 @@ export default function TasksPage() {
     if (task.status === 'cancelled') {
       return { variant: 'cancelled' as const, label: 'Cancelled' };
     }
-    if (isBefore(dueDate, today) && task.status !== 'completed') {
+    if (isBefore(dueDate, today)) {
       return { variant: 'overdue' as const, label: 'Overdue' };
     }
     if (isToday(dueDate)) {

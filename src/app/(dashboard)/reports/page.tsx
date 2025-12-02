@@ -153,7 +153,8 @@ export default function ReportsPage() {
       // Calculate vendor stats
       const vendorMap = new Map<string, VendorStats>();
       visits.forEach(v => {
-        const vendorName = (v.routine as { vendor: { name: string } })?.vendor?.name || 'Unknown';
+        const routine = v.routine as unknown as { vendor: { name: string } } | undefined;
+        const vendorName = routine?.vendor?.name || 'Unknown';
         if (!vendorMap.has(vendorName)) {
           vendorMap.set(vendorName, { name: vendorName, visits: 0, recommendations: 0, completed: 0 });
         }
@@ -163,7 +164,8 @@ export default function ReportsPage() {
       });
 
       recommendations.forEach(r => {
-        const vendorName = (r.visit as { routine: { vendor: { name: string } } })?.routine?.vendor?.name || 'Unknown';
+        const visit = r.visit as unknown as { routine: { vendor: { name: string } } } | undefined;
+        const vendorName = visit?.routine?.vendor?.name || 'Unknown';
         if (vendorMap.has(vendorName)) {
           vendorMap.get(vendorName)!.recommendations++;
         }

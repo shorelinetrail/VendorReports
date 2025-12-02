@@ -16,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import Link from 'next/link';
 
-interface VisitWithDetails extends MaintenanceVisit {
+interface VisitWithDetails extends Omit<MaintenanceVisit, 'routine' | 'vendor_coordinator' | 'maintenance_engineer' | 'technical_engineer'> {
   routine: MaintenanceRoutine & {
     vendor: { name: string };
   };

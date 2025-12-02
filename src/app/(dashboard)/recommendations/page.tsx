@@ -16,7 +16,7 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import Link from 'next/link';
 
-interface RecommendationWithDetails extends Recommendation {
+interface RecommendationWithDetails extends Omit<Recommendation, 'visit' | 'created_by' | 'reviewed_by'> {
   visit: {
     id: string;
     scheduled_date: string;
