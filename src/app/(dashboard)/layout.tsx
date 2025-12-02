@@ -1,13 +1,9 @@
-'use client';
-
 import { ReactNode } from 'react';
-import { AuthProvider } from '@/contexts/AuthContext';
-import DashboardLayout from '@/components/layout/DashboardLayout';
+import ClientLayout from './ClientLayout';
+
+// Force dynamic rendering for all dashboard pages
+export const dynamic = 'force-dynamic';
 
 export default function DashboardRootLayout({ children }: { children: ReactNode }) {
-  return (
-    <AuthProvider>
-      <DashboardLayout>{children}</DashboardLayout>
-    </AuthProvider>
-  );
+  return <ClientLayout>{children}</ClientLayout>;
 }
