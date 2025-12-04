@@ -47,6 +47,7 @@ export default function SignupPage() {
     }
 
     try {
+      // Sign up - the database trigger will create the user profile automatically
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
@@ -64,21 +65,6 @@ export default function SignupPage() {
       }
 
       if (data.user) {
-        // Create user profile
-        const { error: profileError } = await supabase
-          .from('users')
-          .insert({
-            id: data.user.id,
-            email,
-            full_name: fullName,
-            role,
-          });
-
-        if (profileError) {
-          setError(profileError.message);
-          return;
-        }
-
         setSuccess(true);
         setTimeout(() => {
           router.push('/login');
