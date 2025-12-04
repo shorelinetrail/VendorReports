@@ -29,7 +29,7 @@ interface TaskWithDetails extends Omit<Task, 'visit' | 'assigned_to'> {
 }
 
 export default function TasksPage() {
-  const { userProfile, hasRole } = useAuth();
+  const { userProfile, hasRole, loading: authLoading } = useAuth();
   const [tasks, setTasks] = useState<TaskWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('pending');
@@ -40,10 +40,15 @@ export default function TasksPage() {
 
   useEffect(() => {
     fetchTasks();
-  }, [userProfile, showAllUsers]);
+  }, [userProfile, showAllUsers, authLoading]);
 
   const fetchTasks = async () => {
-    if (!userProfile) return;
+    if (authLoading) return;
+
+    if (!userProfile) {
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     try {
