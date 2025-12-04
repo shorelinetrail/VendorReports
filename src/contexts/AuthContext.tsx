@@ -29,7 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(session?.user ?? null);
 
       if (session?.user) {
-        await fetchUserProfile(session.user.id);
+        await fetchUserProfile(session.user);
       }
 
       setLoading(false);
@@ -41,7 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(session?.user ?? null);
 
       if (session?.user) {
-        await fetchUserProfile(session.user.id);
+        await fetchUserProfile(session.user);
       } else {
         setUserProfile(null);
       }
@@ -52,15 +52,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchUserProfile = async (userId: string) => {
+  const fetchUserProfile = async (authUser: SupabaseUser) => {
     const { data, error } = await supabase
       .from('users')
       .select('*')
-      .eq('id', userId)
+      .eq('id', authUser.id)
       .single();
 
     if (!error && data) {
       setUserProfile(data);
+    } else {
+      // If user profile doesn't exist in database, create a fallback from auth metadata
+      // This handles the case when the database trigger hasn't been set up yet
+      const metadata = authUser.user_metadata;
+      const fallbackProfile: User = {
+        id: authUser.id,
+        email: authUser.email || '',
+        full_name: metadata?.full_name || metadata?.name || authUser.email?.split('@')[0] || 'User',
+        role: (metadata?.role as UserRole) || 'vendor_coordinator',
+        created_at: authUser.created_at,
+        updated_at: authUser.updated_at || authUser.created_at,
+      };
+      setUserProfile(fallbackProfile);
+      console.warn('User profile not found in database. Using fallback from auth metadata.');
     }
   };
 
