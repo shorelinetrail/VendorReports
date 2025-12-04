@@ -107,52 +107,43 @@ export default function UsersPage() {
         if (error) throw error;
         setSuccess('User updated successfully');
       } else {
-        // Create new user via auth and then add to users table
+        // Create new user via signup
         if (!formData.password || formData.password.length < 6) {
           throw new Error('Password must be at least 6 characters');
         }
 
-        const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+        // Use regular signUp - the database trigger will create the user profile
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
           email: formData.email,
           password: formData.password,
-          email_confirm: true,
-        });
-
-        if (authError) {
-          // Try regular signup if admin endpoint fails
-          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email: formData.email,
-            password: formData.password,
-          });
-
-          if (signUpError) throw signUpError;
-
-          if (signUpData.user) {
-            const { error: profileError } = await supabase
-              .from('users')
-              .insert({
-                id: signUpData.user.id,
-                email: formData.email,
-                full_name: formData.full_name,
-                role: formData.role,
-              });
-
-            if (profileError) throw profileError;
-          }
-        } else if (authData.user) {
-          const { error: profileError } = await supabase
-            .from('users')
-            .insert({
-              id: authData.user.id,
-              email: formData.email,
+          options: {
+            data: {
               full_name: formData.full_name,
               role: formData.role,
-            });
+            },
+          },
+        });
 
-          if (profileError) throw profileError;
+        if (signUpError) throw signUpError;
+
+        if (!signUpData.user) {
+          throw new Error('Failed to create user');
         }
 
-        setSuccess('User created successfully');
+        // Update the user profile with admin-set values (in case trigger used defaults)
+        const { error: updateError } = await supabase
+          .from('users')
+          .update({
+            full_name: formData.full_name,
+            role: formData.role,
+          })
+          .eq('id', signUpData.user.id);
+
+        if (updateError) {
+          console.warn('Could not update user profile:', updateError);
+        }
+
+        setSuccess('User created successfully. They will receive a confirmation email.');
       }
 
       await fetchUsers();
