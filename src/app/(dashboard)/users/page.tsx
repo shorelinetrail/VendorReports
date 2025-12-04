@@ -130,17 +130,21 @@ export default function UsersPage() {
           throw new Error('Failed to create user');
         }
 
-        // Update the user profile with admin-set values (in case trigger used defaults)
-        const { error: updateError } = await supabase
+        // Wait a moment for the trigger to complete, then upsert the correct values
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Upsert to ensure correct values (overrides trigger defaults)
+        const { error: upsertError } = await supabase
           .from('users')
-          .update({
+          .upsert({
+            id: signUpData.user.id,
+            email: formData.email,
             full_name: formData.full_name,
             role: formData.role,
-          })
-          .eq('id', signUpData.user.id);
+          });
 
-        if (updateError) {
-          console.warn('Could not update user profile:', updateError);
+        if (upsertError) {
+          throw new Error(`Failed to set user profile: ${upsertError.message}`);
         }
 
         setSuccess('User created successfully. They will receive a confirmation email.');
