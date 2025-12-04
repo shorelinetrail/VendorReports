@@ -25,19 +25,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setUser(session?.user ?? null);
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) {
+          console.error('Error getting session:', error);
+        }
+        setUser(session?.user ?? null);
 
-      if (session?.user) {
-        await fetchUserProfile(session.user);
+        if (session?.user) {
+          await fetchUserProfile(session.user);
+        }
+      } catch (err) {
+        console.error('Exception in getSession:', err);
+      } finally {
+        setLoading(false);
       }
-
-      setLoading(false);
     };
 
     getSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth state changed:', event);
       setUser(session?.user ?? null);
 
       if (session?.user) {
@@ -117,9 +125,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setUserProfile(null);
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error('Sign out error:', error);
+      }
+      setUser(null);
+      setUserProfile(null);
+      // Redirect to login page
+      window.location.href = '/login';
+    } catch (err) {
+      console.error('Sign out exception:', err);
+      // Force redirect even on error
+      window.location.href = '/login';
+    }
   };
 
   const hasRole = (roles: UserRole | UserRole[]) => {
