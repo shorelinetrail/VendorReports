@@ -46,7 +46,7 @@ interface PendingTask {
 }
 
 export default function DashboardPage() {
-  const { userProfile } = useAuth();
+  const { userProfile, loading: authLoading } = useAuth();
   const [stats, setStats] = useState<DashboardStats>({
     totalRoutines: 0,
     activeVisits: 0,
@@ -62,7 +62,14 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const fetchDashboardData = async () => {
-      if (!userProfile) return;
+      // Wait for auth to finish loading
+      if (authLoading) return;
+
+      // If no user profile after auth loaded, just stop loading
+      if (!userProfile) {
+        setLoading(false);
+        return;
+      }
 
       try {
         // Fetch stats
@@ -137,7 +144,7 @@ export default function DashboardPage() {
     };
 
     fetchDashboardData();
-  }, [userProfile]);
+  }, [userProfile, authLoading]);
 
   const statCards = [
     { title: 'Active Routines', value: stats.totalRoutines, icon: Calendar, color: 'bg-blue-500' },
