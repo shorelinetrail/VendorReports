@@ -107,48 +107,31 @@ export default function UsersPage() {
         if (error) throw error;
         setSuccess('User updated successfully');
       } else {
-        // Create new user via signup
+        // Create new user via server API (to avoid logging out the admin)
         if (!formData.password || formData.password.length < 6) {
           throw new Error('Password must be at least 6 characters');
         }
 
-        // Use regular signUp - the database trigger will create the user profile
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-          email: formData.email,
-          password: formData.password,
-          options: {
-            data: {
-              full_name: formData.full_name,
-              role: formData.role,
-            },
+        const response = await fetch('/api/users', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
           },
-        });
-
-        if (signUpError) throw signUpError;
-
-        if (!signUpData.user) {
-          throw new Error('Failed to create user');
-        }
-
-        // Wait for the trigger to create the user profile
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        // Update the user profile with correct values (trigger creates with defaults)
-        const { error: updateError } = await supabase
-          .from('users')
-          .update({
+          body: JSON.stringify({
+            email: formData.email,
+            password: formData.password,
             full_name: formData.full_name,
             role: formData.role,
-          })
-          .eq('id', signUpData.user.id);
+          }),
+        });
 
-        if (updateError) {
-          // User was created but profile update failed - can be edited later
-          console.warn('Could not update user profile:', updateError.message);
-          setSuccess('User created but profile update failed. You can edit the user to fix their name/role.');
-        } else {
-          setSuccess('User created successfully. They will receive a confirmation email.');
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to create user');
         }
+
+        setSuccess('User created successfully');
       }
 
       await fetchUsers();
