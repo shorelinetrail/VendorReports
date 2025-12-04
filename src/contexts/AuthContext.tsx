@@ -36,13 +36,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(session?.user ?? null);
 
         if (session?.user) {
-          await fetchUserProfile(session.user);
+          // Don't await - let profile load in background so page can render
+          fetchUserProfile(session.user);
         }
       } catch (err) {
         console.error('AuthContext: Exception in getSession:', err);
-      } finally {
-        setLoading(false);
       }
+      // Always set loading to false, don't wait for profile
+      setLoading(false);
     };
 
     getSession();
@@ -50,14 +51,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('AuthContext: Auth state changed:', event);
       setUser(session?.user ?? null);
+      setLoading(false);
 
       if (session?.user) {
-        await fetchUserProfile(session.user);
+        // Don't await - let profile load in background
+        fetchUserProfile(session.user);
       } else {
         setUserProfile(null);
       }
-
-      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
@@ -66,36 +67,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fetchUserProfile = async (authUser: SupabaseUser) => {
     console.log('AuthContext: Fetching user profile for:', authUser.id);
 
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', authUser.id)
-      .single();
+    // Create fallback profile immediately so UI can render
+    const metadata = authUser.user_metadata;
+    const fallbackProfile: User = {
+      id: authUser.id,
+      email: authUser.email || '',
+      full_name: metadata?.full_name || metadata?.name || authUser.email?.split('@')[0] || 'User',
+      role: (metadata?.role as UserRole) || 'vendor_coordinator',
+      created_at: authUser.created_at,
+      updated_at: authUser.updated_at || authUser.created_at,
+    };
 
-    if (error) {
-      console.error('AuthContext: Error fetching user profile:', error.message, error.code);
-    }
+    // Set fallback immediately
+    setUserProfile(fallbackProfile);
 
-    if (!error && data) {
-      console.log('AuthContext: User profile loaded:', data.email, data.role);
-      setUserProfile(data);
-    } else {
-      // Create a fallback profile from auth metadata when DB query fails
-      // This handles cases where RLS policies block the query or profile doesn't exist yet
-      const metadata = authUser.user_metadata;
-      console.log('AuthContext: Creating fallback profile from metadata:', metadata);
+    // Then try to get the real profile from DB (with timeout)
+    try {
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Timeout')), 5000)
+      );
 
-      const fallbackProfile: User = {
-        id: authUser.id,
-        email: authUser.email || '',
-        full_name: metadata?.full_name || metadata?.name || authUser.email?.split('@')[0] || 'User',
-        role: (metadata?.role as UserRole) || 'vendor_coordinator',
-        created_at: authUser.created_at,
-        updated_at: authUser.updated_at || authUser.created_at,
-      };
+      const fetchPromise = supabase
+        .from('users')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
 
-      console.log('AuthContext: Using fallback profile:', fallbackProfile.email, fallbackProfile.role);
-      setUserProfile(fallbackProfile);
+      const { data, error } = await Promise.race([fetchPromise, timeoutPromise]) as { data: User | null; error: Error | null };
+
+      if (!error && data) {
+        console.log('AuthContext: User profile loaded from DB:', data.email, data.role);
+        setUserProfile(data);
+      } else if (error) {
+        console.warn('AuthContext: Using fallback profile, DB error:', error.message);
+      }
+    } catch (err) {
+      console.warn('AuthContext: Using fallback profile, fetch failed:', err);
     }
   };
 
