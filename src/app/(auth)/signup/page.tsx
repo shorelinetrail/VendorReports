@@ -56,6 +56,7 @@ export default function SignupPage() {
             full_name: fullName,
             role,
           },
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
         },
       });
 
@@ -64,14 +65,27 @@ export default function SignupPage() {
         return;
       }
 
+      // When email confirmation is enabled, user will be returned but session will be null
+      // The user needs to confirm their email before they can log in
       if (data.user) {
-        setSuccess(true);
-        setTimeout(() => {
-          router.push('/login');
-        }, 2000);
+        // Check if email confirmation is required (session is null)
+        if (!data.session) {
+          setSuccess(true);
+          // Don't redirect - show message about checking email
+        } else {
+          // If session exists, user is confirmed and logged in
+          setSuccess(true);
+          setTimeout(() => {
+            router.push('/dashboard');
+          }, 2000);
+        }
+      } else if (!signUpError) {
+        // No error and no user - likely email already registered but unconfirmed
+        setError('This email may already be registered. Please check your inbox for a confirmation email or try logging in.');
       }
-    } catch {
-      setError('An unexpected error occurred');
+    } catch (err) {
+      console.error('Signup error:', err);
+      setError('An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -97,7 +111,7 @@ export default function SignupPage() {
 
           {success && (
             <Alert variant="success" className="mb-4">
-              Account created successfully! Redirecting to login...
+              Account created successfully! Please check your email to confirm your account, then you can log in.
             </Alert>
           )}
 
