@@ -32,11 +32,13 @@ export default function Sidebar() {
   const pathname = usePathname();
   const { userProfile, signOut, loading } = useAuth();
 
+  // Show all navigation items based on role, or show all if no role yet (fallback)
+  const userRole = userProfile?.role || 'vendor_coordinator';
   const filteredNavigation = navigation.filter(
-    (item) => userProfile && item.roles.includes(userProfile.role)
+    (item) => item.roles.includes(userRole)
   );
 
-  // Show loading skeleton while auth is initializing
+  // Show loading skeleton only briefly while auth is initializing
   if (loading) {
     return (
       <div className="flex flex-col h-full bg-gray-900 text-white w-64">

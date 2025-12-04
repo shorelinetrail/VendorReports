@@ -57,20 +57,22 @@ export default function DashboardPage() {
   });
   const [upcomingVisits, setUpcomingVisits] = useState<UpcomingVisit[]>([]);
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [dataLoaded, setDataLoaded] = useState(false);
   const supabase = createClient();
 
   useEffect(() => {
     const fetchDashboardData = async () => {
+      // Don't fetch if already loaded or currently loading
+      if (dataLoaded || dataLoading) return;
+
       // Wait for auth to finish loading
       if (authLoading) return;
 
-      // If no user profile after auth loaded, stop loading
-      if (!userProfile) {
-        setLoading(false);
-        return;
-      }
+      // If no user profile, nothing to fetch
+      if (!userProfile) return;
 
+      setDataLoading(true);
       try {
         // Fetch stats
         const [routinesRes, visitsRes, tasksRes, recommendationsRes] = await Promise.all([
@@ -139,12 +141,13 @@ export default function DashboardPage() {
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
       } finally {
-        setLoading(false);
+        setDataLoading(false);
+        setDataLoaded(true);
       }
     };
 
     fetchDashboardData();
-  }, [userProfile, authLoading]);
+  }, [userProfile, authLoading, dataLoading, dataLoaded]);
 
   const statCards = [
     { title: 'Active Routines', value: stats.totalRoutines, icon: Calendar, color: 'bg-blue-500' },
@@ -179,7 +182,8 @@ export default function DashboardPage() {
     return variants[status] || 'pending';
   };
 
-  if (loading) {
+  // Only show loading spinner during initial auth check
+  if (authLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
