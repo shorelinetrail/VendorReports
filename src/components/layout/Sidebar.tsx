@@ -30,11 +30,33 @@ const navigation = [
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { userProfile, signOut } = useAuth();
+  const { userProfile, signOut, loading } = useAuth();
 
   const filteredNavigation = navigation.filter(
     (item) => userProfile && item.roles.includes(userProfile.role)
   );
+
+  // Show loading skeleton while auth is initializing
+  if (loading) {
+    return (
+      <div className="flex flex-col h-full bg-gray-900 text-white w-64">
+        {/* Logo */}
+        <div className="flex items-center h-16 px-6 border-b border-gray-800">
+          <Building2 className="w-8 h-8 text-primary-500" />
+          <span className="ml-3 text-lg font-semibold">Vendor Reports</span>
+        </div>
+        {/* Loading skeleton */}
+        <nav className="flex-1 px-4 py-4 space-y-2">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="h-10 bg-gray-800 rounded-md animate-pulse" />
+          ))}
+        </nav>
+        <div className="p-4 border-t border-gray-800">
+          <div className="h-12 bg-gray-800 rounded-md animate-pulse" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full bg-gray-900 text-white w-64">

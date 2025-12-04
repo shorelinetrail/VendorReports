@@ -65,7 +65,7 @@ export default function DashboardPage() {
       // Wait for auth to finish loading
       if (authLoading) return;
 
-      // If no user profile after auth loaded, just stop loading
+      // If no user profile after auth loaded, stop loading
       if (!userProfile) {
         setLoading(false);
         return;

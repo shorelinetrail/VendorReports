@@ -43,8 +43,10 @@ export default function TasksPage() {
   }, [userProfile, showAllUsers, authLoading]);
 
   const fetchTasks = async () => {
+    // Wait for auth to finish loading
     if (authLoading) return;
 
+    // If no user profile after auth loaded, stop loading
     if (!userProfile) {
       setLoading(false);
       return;

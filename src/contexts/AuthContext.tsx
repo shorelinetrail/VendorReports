@@ -25,18 +25,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const getSession = async () => {
+      console.log('AuthContext: Getting session...');
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
         if (error) {
-          console.error('Error getting session:', error);
+          console.error('AuthContext: Error getting session:', error.message);
         }
+
+        console.log('AuthContext: Session exists:', !!session?.user);
         setUser(session?.user ?? null);
 
         if (session?.user) {
           await fetchUserProfile(session.user);
         }
       } catch (err) {
-        console.error('Exception in getSession:', err);
+        console.error('AuthContext: Exception in getSession:', err);
       } finally {
         setLoading(false);
       }
@@ -45,7 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     getSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state changed:', event);
+      console.log('AuthContext: Auth state changed:', event);
       setUser(session?.user ?? null);
 
       if (session?.user) {
@@ -61,18 +64,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const fetchUserProfile = async (authUser: SupabaseUser) => {
+    console.log('AuthContext: Fetching user profile for:', authUser.id);
+
     const { data, error } = await supabase
       .from('users')
       .select('*')
       .eq('id', authUser.id)
       .single();
 
+    if (error) {
+      console.error('AuthContext: Error fetching user profile:', error.message, error.code);
+    }
+
     if (!error && data) {
+      console.log('AuthContext: User profile loaded:', data.email, data.role);
       setUserProfile(data);
     } else {
-      // If user profile doesn't exist in database, create a fallback from auth metadata
-      // This handles the case when the database trigger hasn't been set up yet
+      // Create a fallback profile from auth metadata when DB query fails
+      // This handles cases where RLS policies block the query or profile doesn't exist yet
       const metadata = authUser.user_metadata;
+      console.log('AuthContext: Creating fallback profile from metadata:', metadata);
+
       const fallbackProfile: User = {
         id: authUser.id,
         email: authUser.email || '',
@@ -81,8 +93,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         created_at: authUser.created_at,
         updated_at: authUser.updated_at || authUser.created_at,
       };
+
+      console.log('AuthContext: Using fallback profile:', fallbackProfile.email, fallbackProfile.role);
       setUserProfile(fallbackProfile);
-      console.warn('User profile not found in database. Using fallback from auth metadata.');
     }
   };
 
@@ -125,20 +138,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    console.log('AuthContext: Signing out...');
     try {
       const { error } = await supabase.auth.signOut();
       if (error) {
-        console.error('Sign out error:', error);
+        console.error('AuthContext: Sign out error:', error.message);
       }
-      setUser(null);
-      setUserProfile(null);
-      // Redirect to login page
-      window.location.href = '/login';
     } catch (err) {
-      console.error('Sign out exception:', err);
-      // Force redirect even on error
-      window.location.href = '/login';
+      console.error('AuthContext: Sign out exception:', err);
     }
+
+    setUser(null);
+    setUserProfile(null);
+
+    // Force redirect to login page
+    window.location.href = '/login';
   };
 
   const hasRole = (roles: UserRole | UserRole[]) => {
