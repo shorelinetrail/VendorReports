@@ -22,6 +22,7 @@ interface VisitDetails extends Omit<MaintenanceVisit, 'routine' | 'vendor_coordi
     id: string;
     plan_number: string;
     description: string;
+    requires_technical_review: boolean;
     vendor: { id: string; name: string };
   };
   vendor_coordinator: { id: string; full_name: string; email: string };
@@ -78,6 +79,7 @@ export default function VisitDetailPage() {
               id,
               plan_number,
               description,
+              requires_technical_review,
               vendor:vendors(id, name)
             ),
             vendor_coordinator:users!maintenance_visits_vendor_coordinator_id_fkey(id, full_name, email),
@@ -203,33 +205,63 @@ export default function VisitDetailPage() {
 
   const handleCreateRecommendation = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userProfile) return;
+    if (!userProfile || !visit) return;
 
     setError(null);
     setSuccess(null);
     setSubmitting(true);
 
     try {
-      const { error } = await supabase.from('recommendations').insert({
+      // Determine initial status based on whether technical review is required
+      const requiresReview = visit.routine?.requires_technical_review ?? true;
+      const initialStatus = requiresReview ? 'in_review' : 'open';
+
+      const { data: newRec, error } = await supabase.from('recommendations').insert({
         visit_id: visitId,
         description: newRecommendation.description,
         sap_notification_number: newRecommendation.sap_notification_number || null,
         due_date: newRecommendation.due_date || null,
         created_by_id: userProfile.id,
-        status: 'open' as RecommendationStatus,
-      });
+        status: initialStatus as RecommendationStatus,
+        sent_for_review: requiresReview,
+      }).select('id').single();
 
       if (error) throw error;
 
-      // Update visit status if this is the first recommendation
-      if (recommendations.length === 0) {
+      // Update visit status
+      if (recommendations.length === 0 || requiresReview) {
         await supabase
           .from('maintenance_visits')
-          .update({ status: 'recommendations_created' as VisitStatus })
+          .update({ status: requiresReview ? 'in_review' : 'recommendations_created' as VisitStatus })
           .eq('id', visitId);
       }
 
-      setSuccess('Recommendation created successfully');
+      // If technical review is required, create a task for the technical engineer
+      if (requiresReview && visit.technical_engineer_id && newRec) {
+        const { data: configData } = await supabase
+          .from('system_config')
+          .select('config_value')
+          .eq('config_key', 'technical_review_days')
+          .single();
+
+        const reviewDays = parseInt(configData?.config_value || '7', 10);
+        const dueDate = new Date();
+        dueDate.setDate(dueDate.getDate() + reviewDays);
+
+        await supabase.from('tasks').insert({
+          visit_id: visitId,
+          task_type: 'technical_review',
+          assigned_to_id: visit.technical_engineer_id,
+          status: 'pending',
+          due_date: dueDate.toISOString().split('T')[0],
+          notes: `Review recommendation: ${newRec.id}`,
+        });
+      }
+
+      setSuccess(requiresReview
+        ? 'Recommendation created and sent for technical review'
+        : 'Recommendation created successfully'
+      );
       await fetchVisitData();
       setTimeout(() => {
         setRecommendationModalOpen(false);

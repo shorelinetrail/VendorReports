@@ -26,6 +26,7 @@ interface RoutineFormData {
   maintenance_engineer_id: string;
   technical_engineer_id: string;
   is_active: boolean;
+  requires_technical_review: boolean;
 }
 
 const initialFormData: RoutineFormData = {
@@ -39,6 +40,7 @@ const initialFormData: RoutineFormData = {
   maintenance_engineer_id: '',
   technical_engineer_id: '',
   is_active: true,
+  requires_technical_review: true,
 };
 
 export default function RoutinesPage() {
@@ -103,6 +105,7 @@ export default function RoutinesPage() {
         maintenance_engineer_id: routine.maintenance_engineer_id,
         technical_engineer_id: routine.technical_engineer_id,
         is_active: routine.is_active,
+        requires_technical_review: routine.requires_technical_review ?? true,
       });
     } else {
       setEditingId(null);
@@ -356,17 +359,32 @@ export default function RoutinesPage() {
             />
           </div>
 
-          <div className="flex items-center">
-            <input
-              type="checkbox"
-              id="is_active"
-              checked={formData.is_active}
-              onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-              className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
-            />
-            <label htmlFor="is_active" className="ml-2 block text-sm text-gray-900">
-              Active
-            </label>
+          <div className="flex items-center space-x-6">
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="is_active"
+                checked={formData.is_active}
+                onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+              />
+              <label htmlFor="is_active" className="ml-2 block text-sm text-gray-900">
+                Active
+              </label>
+            </div>
+
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="requires_technical_review"
+                checked={formData.requires_technical_review}
+                onChange={(e) => setFormData({ ...formData, requires_technical_review: e.target.checked })}
+                className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+              />
+              <label htmlFor="requires_technical_review" className="ml-2 block text-sm text-gray-900">
+                Requires Technical Review
+              </label>
+            </div>
           </div>
 
           <div className="flex justify-end space-x-3 pt-4 border-t">

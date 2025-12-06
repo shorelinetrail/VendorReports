@@ -49,6 +49,7 @@ export interface MaintenanceRoutine {
   technical_engineer_id: string;
   technical_engineer?: User;
   is_active: boolean;
+  requires_technical_review: boolean;
   created_at: string;
   updated_at: string;
 }
