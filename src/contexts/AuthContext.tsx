@@ -8,20 +8,29 @@ import { User, UserRole } from '@/types/database';
 interface AuthContextType {
   user: SupabaseUser | null;
   userProfile: User | null;
+  realUserProfile: User | null; // The actual logged-in user (for impersonation)
+  isImpersonating: boolean;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, fullName: string, role: UserRole) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   hasRole: (roles: UserRole | UserRole[]) => boolean;
+  startImpersonation: (user: User) => void;
+  stopImpersonation: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SupabaseUser | null>(null);
-  const [userProfile, setUserProfile] = useState<User | null>(null);
+  const [realUserProfile, setRealUserProfile] = useState<User | null>(null);
+  const [impersonatedProfile, setImpersonatedProfile] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const supabase = createClient();
+
+  // Return impersonated profile if set, otherwise real profile
+  const userProfile = impersonatedProfile || realUserProfile;
+  const isImpersonating = impersonatedProfile !== null;
 
   useEffect(() => {
     const getSession = async () => {
@@ -57,7 +66,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Don't await - let profile load in background
         fetchUserProfile(session.user);
       } else {
-        setUserProfile(null);
+        setRealUserProfile(null);
+        setImpersonatedProfile(null);
       }
     });
 
@@ -79,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     // Set fallback immediately
-    setUserProfile(fallbackProfile);
+    setRealUserProfile(fallbackProfile);
 
     // Then try to get the real profile from DB (with timeout)
     try {
@@ -97,7 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (!error && data) {
         console.log('AuthContext: User profile loaded from DB:', data.email, data.role);
-        setUserProfile(data);
+        setRealUserProfile(data);
       } else if (error) {
         console.warn('AuthContext: Using fallback profile, DB error:', error.message);
       }
@@ -156,7 +166,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setUser(null);
-    setUserProfile(null);
+    setRealUserProfile(null);
+    setImpersonatedProfile(null);
 
     // Force redirect to login page
     window.location.href = '/login';
@@ -168,8 +179,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return roleArray.includes(userProfile.role);
   };
 
+  const startImpersonation = (targetUser: User) => {
+    // Only admins can impersonate
+    if (realUserProfile?.role !== 'admin') {
+      console.warn('Only admins can impersonate users');
+      return;
+    }
+    console.log('AuthContext: Starting impersonation as:', targetUser.full_name, targetUser.role);
+    setImpersonatedProfile(targetUser);
+  };
+
+  const stopImpersonation = () => {
+    console.log('AuthContext: Stopping impersonation');
+    setImpersonatedProfile(null);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, userProfile, loading, signIn, signUp, signOut, hasRole }}>
+    <AuthContext.Provider value={{
+      user,
+      userProfile,
+      realUserProfile,
+      isImpersonating,
+      loading,
+      signIn,
+      signUp,
+      signOut,
+      hasRole,
+      startImpersonation,
+      stopImpersonation,
+    }}>
       {children}
     </AuthContext.Provider>
   );

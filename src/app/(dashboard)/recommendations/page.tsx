@@ -117,6 +117,11 @@ export default function RecommendationsPage() {
 
   const handleComplete = async (id: string) => {
     try {
+      // Get the recommendation to find its visit
+      const rec = recommendations.find(r => r.id === id);
+      if (!rec) return;
+
+      // Mark recommendation as completed
       const { error } = await supabase
         .from('recommendations')
         .update({
@@ -126,6 +131,31 @@ export default function RecommendationsPage() {
         .eq('id', id);
 
       if (error) throw error;
+
+      // Check if all recommendations for this visit are now completed
+      const { data: visitRecs, error: fetchError } = await supabase
+        .from('recommendations')
+        .select('id, status')
+        .eq('visit_id', rec.visit.id);
+
+      if (fetchError) throw fetchError;
+
+      // If all recommendations are completed or cancelled, mark the visit as completed
+      const allDone = visitRecs?.every(
+        r => r.id === id || r.status === 'completed' || r.status === 'cancelled'
+      );
+
+      if (allDone && visitRecs && visitRecs.length > 0) {
+        const { error: visitError } = await supabase
+          .from('maintenance_visits')
+          .update({ status: 'completed' })
+          .eq('id', rec.visit.id);
+
+        if (visitError) {
+          console.warn('Could not update visit status:', visitError.message);
+        }
+      }
+
       await fetchRecommendations();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
