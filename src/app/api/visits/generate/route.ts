@@ -7,12 +7,15 @@ import { addMonths, isBefore, isAfter, startOfDay, format } from 'date-fns';
 
 export async function POST(request: NextRequest) {
   try {
-    // Verify authorization (either API key or authenticated admin)
+    // Verify authorization (either Vercel cron, API key, or authenticated admin)
     const authHeader = request.headers.get('authorization');
     const cronSecret = process.env.CRON_SECRET;
 
-    // Allow if valid cron secret or if we'll verify session below
-    const isCronJob = cronSecret && authHeader === `Bearer ${cronSecret}`;
+    // Vercel cron jobs include this header
+    const isVercelCron = request.headers.get('x-vercel-cron') === '1';
+
+    // Allow if Vercel cron, valid cron secret, or if we'll verify session below
+    const isCronJob = isVercelCron || (cronSecret && authHeader === `Bearer ${cronSecret}`);
 
     // Create admin client for database operations
     const supabaseAdmin = createClient(
@@ -74,23 +77,18 @@ export async function POST(request: NextRequest) {
       const startDate = startOfDay(new Date(routine.start_date));
       const intervalMonths = routine.interval_months || 12;
 
-      // Generate all scheduled dates from start until horizon
+      // Generate scheduled dates - only future or today
       let scheduledDate = startDate;
       const scheduledDates: Date[] = [];
 
-      // Move forward to find dates that are relevant (not too far in the past)
-      // Start from a reasonable point - go back one interval from today
-      const lookbackDate = addMonths(today, -intervalMonths);
-
-      while (isBefore(scheduledDate, lookbackDate)) {
+      // Fast-forward to find the next scheduled date that is today or in the future
+      while (isBefore(scheduledDate, today)) {
         scheduledDate = addMonths(scheduledDate, intervalMonths);
       }
 
-      // Now collect all dates from lookback through horizon
+      // Now collect dates from today through horizon
       while (isBefore(scheduledDate, horizonDate) || scheduledDate.getTime() === horizonDate.getTime()) {
-        if (isAfter(scheduledDate, lookbackDate) || scheduledDate.getTime() === lookbackDate.getTime()) {
-          scheduledDates.push(new Date(scheduledDate));
-        }
+        scheduledDates.push(new Date(scheduledDate));
         scheduledDate = addMonths(scheduledDate, intervalMonths);
       }
 
