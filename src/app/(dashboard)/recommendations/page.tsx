@@ -100,6 +100,18 @@ export default function RecommendationsPage() {
 
       if (error) throw error;
 
+      // Mark the technical review task as completed
+      await supabase
+        .from('tasks')
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+        })
+        .eq('visit_id', selectedRecommendation.visit.id)
+        .eq('task_type', 'technical_review')
+        .eq('assigned_to_id', userProfile.id)
+        .eq('status', 'pending');
+
       setSuccess('Review submitted successfully');
       await fetchRecommendations();
       setTimeout(() => {

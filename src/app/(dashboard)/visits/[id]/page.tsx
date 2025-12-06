@@ -261,6 +261,29 @@ export default function VisitDetailPage() {
         .update({ status: 'in_review' as VisitStatus })
         .eq('id', visitId);
 
+      // Create a task for the technical engineer to review
+      if (visit?.technical_engineer_id) {
+        // Get the technical review days setting
+        const { data: configData } = await supabase
+          .from('system_config')
+          .select('config_value')
+          .eq('config_key', 'technical_review_days')
+          .single();
+
+        const reviewDays = parseInt(configData?.config_value || '7', 10);
+        const dueDate = new Date();
+        dueDate.setDate(dueDate.getDate() + reviewDays);
+
+        await supabase.from('tasks').insert({
+          visit_id: visitId,
+          task_type: 'technical_review',
+          assigned_to_id: visit.technical_engineer_id,
+          status: 'pending',
+          due_date: dueDate.toISOString().split('T')[0],
+          notes: `Review recommendation: ${recommendationId}`,
+        });
+      }
+
       await fetchVisitData();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
@@ -288,6 +311,18 @@ export default function VisitDetailPage() {
         .eq('id', selectedRecommendation.id);
 
       if (error) throw error;
+
+      // Mark the technical review task as completed
+      await supabase
+        .from('tasks')
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+        })
+        .eq('visit_id', visitId)
+        .eq('task_type', 'technical_review')
+        .eq('assigned_to_id', userProfile.id)
+        .eq('status', 'pending');
 
       setSuccess('Review submitted successfully');
       await fetchVisitData();
