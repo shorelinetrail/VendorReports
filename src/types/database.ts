@@ -7,7 +7,8 @@ export type TaskType =
   | 'upload_report'
   | 'create_recommendations'
   | 'review_recommendations'
-  | 'technical_review';
+  | 'technical_review'
+  | 'close_visit';
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'overdue' | 'cancelled';
 

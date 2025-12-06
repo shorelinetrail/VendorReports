@@ -126,6 +126,7 @@ export default function TasksPage() {
       create_recommendations: 'Create Recommendations',
       review_recommendations: 'Review Recommendations',
       technical_review: 'Technical Review',
+      close_visit: 'Close Visit',
     };
     return labels[type] || type;
   };
@@ -137,6 +138,7 @@ export default function TasksPage() {
       create_recommendations: 'bg-green-100 text-green-800',
       review_recommendations: 'bg-yellow-100 text-yellow-800',
       technical_review: 'bg-orange-100 text-orange-800',
+      close_visit: 'bg-emerald-100 text-emerald-800',
     };
     return colors[type] || 'bg-gray-100 text-gray-800';
   };

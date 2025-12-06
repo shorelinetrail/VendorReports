@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus } from 'lucide-react';
+import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check } from 'lucide-react';
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -379,6 +379,65 @@ export default function VisitDetailPage() {
     }
   };
 
+  const handleCloseVisit = async () => {
+    if (!confirm('Are you sure you want to close this visit? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      // Update visit status to completed
+      const { error: visitError } = await supabase
+        .from('maintenance_visits')
+        .update({ status: 'completed' as VisitStatus })
+        .eq('id', visitId);
+
+      if (visitError) throw visitError;
+
+      // Mark any pending close_visit task as completed
+      if (userProfile) {
+        await supabase
+          .from('tasks')
+          .update({
+            status: 'completed',
+            completed_at: new Date().toISOString(),
+          })
+          .eq('visit_id', visitId)
+          .eq('task_type', 'close_visit')
+          .in('status', ['pending', 'in_progress']);
+      }
+
+      await fetchVisitData();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      alert(message);
+    }
+  };
+
+  // Calculate workflow step based on status
+  const getWorkflowStep = (status: VisitStatus): number => {
+    const steps: Record<VisitStatus, number> = {
+      scheduled: 1,
+      date_confirmed: 2,
+      report_uploaded: 3,
+      recommendations_created: 4,
+      in_review: 5,
+      completed: 6,
+      cancelled: 0,
+    };
+    return steps[status] || 1;
+  };
+
+  const workflowSteps = [
+    { step: 1, label: 'Scheduled', description: 'Visit date set' },
+    { step: 2, label: 'Date Confirmed', description: 'Vendor coordinator confirmed' },
+    { step: 3, label: 'Report Uploaded', description: 'Maintenance report received' },
+    { step: 4, label: 'Recommendations', description: 'Engineer created recommendations' },
+    { step: 5, label: 'In Review', description: 'Technical review in progress' },
+    { step: 6, label: 'Completed', description: 'Visit closed' },
+  ];
+
+  const currentStep = visit ? getWorkflowStep(visit.status) : 1;
+
   const getStatusVariant = (status: string): 'pending' | 'in_progress' | 'completed' | 'cancelled' => {
     const variants: Record<string, 'pending' | 'in_progress' | 'completed' | 'cancelled'> = {
       scheduled: 'pending',
@@ -420,6 +479,15 @@ export default function VisitDetailPage() {
   const canCreateRecommendation = (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && visit.report_file_path;
   const canReview = userProfile?.id === visit.technical_engineer_id || hasRole('admin');
 
+  // Check if all recommendations are done and user can close the visit
+  const allRecommendationsDone = recommendations.length > 0 && recommendations.every(
+    r => r.status === 'completed' || r.status === 'cancelled'
+  );
+  const canCloseVisit = (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin'))
+    && visit.status !== 'completed'
+    && visit.status !== 'cancelled'
+    && allRecommendationsDone;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center space-x-4">
@@ -436,6 +504,54 @@ export default function VisitDetailPage() {
           <p className="text-gray-600">{visit.routine?.description}</p>
         </div>
       </div>
+
+      {/* Workflow Progress Stepper */}
+      {visit.status !== 'cancelled' && (
+        <Card>
+          <CardContent className="py-6">
+            <div className="flex items-center justify-between">
+              {workflowSteps.map((step, index) => (
+                <div key={step.step} className="flex items-center flex-1">
+                  <div className="flex flex-col items-center">
+                    <div
+                      className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium border-2 transition-colors ${
+                        currentStep > step.step
+                          ? 'bg-green-500 border-green-500 text-white'
+                          : currentStep === step.step
+                          ? 'bg-blue-500 border-blue-500 text-white'
+                          : 'bg-white border-gray-300 text-gray-400'
+                      }`}
+                    >
+                      {currentStep > step.step ? (
+                        <Check className="w-5 h-5" />
+                      ) : (
+                        step.step
+                      )}
+                    </div>
+                    <div className="mt-2 text-center">
+                      <p
+                        className={`text-xs font-medium ${
+                          currentStep >= step.step ? 'text-gray-900' : 'text-gray-400'
+                        }`}
+                      >
+                        {step.label}
+                      </p>
+                      <p className="text-xs text-gray-500 hidden sm:block">{step.description}</p>
+                    </div>
+                  </div>
+                  {index < workflowSteps.length - 1 && (
+                    <div
+                      className={`flex-1 h-1 mx-2 ${
+                        currentStep > step.step ? 'bg-green-500' : 'bg-gray-200'
+                      }`}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Visit Details */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -534,6 +650,18 @@ export default function VisitDetailPage() {
                 <Plus className="w-4 h-4 mr-2" />
                 Add Recommendation
               </Button>
+            )}
+            {canCloseVisit && (
+              <Button onClick={handleCloseVisit} className="bg-green-600 hover:bg-green-700">
+                <CheckCircle className="w-4 h-4 mr-2" />
+                Close Visit
+              </Button>
+            )}
+            {visit.status === 'completed' && (
+              <div className="flex items-center text-green-600">
+                <CheckCircle className="w-5 h-5 mr-2" />
+                <span className="font-medium">Visit Completed</span>
+              </div>
             )}
           </div>
         </CardContent>

@@ -76,6 +76,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
           create_recommendations: 'Create Recommendations',
           review_recommendations: 'Review Recommendations',
           technical_review: 'Technical Review',
+          close_visit: 'Close Visit',
         };
 
         const visit = task.visit as { id: string; routine: { plan_number: string } } | null;

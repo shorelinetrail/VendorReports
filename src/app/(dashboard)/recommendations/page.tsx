@@ -152,19 +152,42 @@ export default function RecommendationsPage() {
 
       if (fetchError) throw fetchError;
 
-      // If all recommendations are completed or cancelled, mark the visit as completed
+      // If all recommendations are completed or cancelled, create a close_visit task for the maintenance engineer
       const allDone = visitRecs?.every(
         (r: { id: string; status: string }) => r.id === id || r.status === 'completed' || r.status === 'cancelled'
       );
 
       if (allDone && visitRecs && visitRecs.length > 0) {
-        const { error: visitError } = await supabase
+        // Get the visit to find the maintenance engineer
+        const { data: visitData } = await supabase
           .from('maintenance_visits')
-          .update({ status: 'completed' })
-          .eq('id', rec.visit.id);
+          .select('maintenance_engineer_id, status')
+          .eq('id', rec.visit.id)
+          .single();
 
-        if (visitError) {
-          console.warn('Could not update visit status:', visitError.message);
+        if (visitData && visitData.status !== 'completed') {
+          // Check if a close_visit task already exists
+          const { data: existingTask } = await supabase
+            .from('tasks')
+            .select('id')
+            .eq('visit_id', rec.visit.id)
+            .eq('task_type', 'close_visit')
+            .single();
+
+          if (!existingTask) {
+            // Create close_visit task for maintenance engineer
+            const dueDate = new Date();
+            dueDate.setDate(dueDate.getDate() + 3); // 3 days to close
+
+            await supabase.from('tasks').insert({
+              visit_id: rec.visit.id,
+              task_type: 'close_visit',
+              assigned_to_id: visitData.maintenance_engineer_id,
+              status: 'pending',
+              due_date: dueDate.toISOString().split('T')[0],
+              notes: 'All recommendations completed. Please review and close the visit.',
+            });
+          }
         }
       }
 
@@ -180,6 +203,9 @@ export default function RecommendationsPage() {
     if (!reason) return;
 
     try {
+      const rec = recommendations.find(r => r.id === id);
+      if (!rec) return;
+
       const { error } = await supabase
         .from('recommendations')
         .update({
@@ -190,6 +216,48 @@ export default function RecommendationsPage() {
         .eq('id', id);
 
       if (error) throw error;
+
+      // Check if all recommendations for this visit are now completed or cancelled
+      const { data: visitRecs } = await supabase
+        .from('recommendations')
+        .select('id, status')
+        .eq('visit_id', rec.visit.id);
+
+      const allDone = visitRecs?.every(
+        (r: { id: string; status: string }) => r.id === id || r.status === 'completed' || r.status === 'cancelled'
+      );
+
+      if (allDone && visitRecs && visitRecs.length > 0) {
+        const { data: visitData } = await supabase
+          .from('maintenance_visits')
+          .select('maintenance_engineer_id, status')
+          .eq('id', rec.visit.id)
+          .single();
+
+        if (visitData && visitData.status !== 'completed') {
+          const { data: existingTask } = await supabase
+            .from('tasks')
+            .select('id')
+            .eq('visit_id', rec.visit.id)
+            .eq('task_type', 'close_visit')
+            .single();
+
+          if (!existingTask) {
+            const dueDate = new Date();
+            dueDate.setDate(dueDate.getDate() + 3);
+
+            await supabase.from('tasks').insert({
+              visit_id: rec.visit.id,
+              task_type: 'close_visit',
+              assigned_to_id: visitData.maintenance_engineer_id,
+              status: 'pending',
+              due_date: dueDate.toISOString().split('T')[0],
+              notes: 'All recommendations completed/cancelled. Please review and close the visit.',
+            });
+          }
+        }
+      }
+
       await fetchRecommendations();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
