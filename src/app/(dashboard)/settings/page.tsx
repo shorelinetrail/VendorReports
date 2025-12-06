@@ -1,13 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Save, RefreshCw, Eye, UserCheck, Calendar, Play } from 'lucide-react';
+import { Save, RefreshCw, Calendar, Play } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { SystemConfig, User } from '@/types/database';
+import { SystemConfig } from '@/types/database';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import Select from '@/components/ui/Select';
 import Alert from '@/components/ui/Alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 
@@ -33,7 +32,7 @@ const configLabels: Record<string, string> = {
 };
 
 export default function SettingsPage() {
-  const { hasRole, realUserProfile, isImpersonating, startImpersonation, stopImpersonation } = useAuth();
+  const { realUserProfile } = useAuth();
   const [config, setConfig] = useState<ConfigSettings>({
     visit_confirmation_days: '14',
     report_upload_weeks: '2',
@@ -44,8 +43,6 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [users, setUsers] = useState<User[]>([]);
-  const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [generating, setGenerating] = useState(false);
   const [generateResult, setGenerateResult] = useState<{ message: string; visits: string[] } | null>(null);
   const supabase = createClient();
@@ -55,31 +52,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     fetchConfig();
-    if (isAdmin) {
-      fetchUsers();
-    }
-  }, [isAdmin]);
-
-  const fetchUsers = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .order('full_name');
-
-      if (error) throw error;
-      setUsers(data || []);
-    } catch (err) {
-      console.error('Error fetching users:', err);
-    }
-  };
-
-  const handleImpersonate = () => {
-    const user = users.find(u => u.id === selectedUserId);
-    if (user) {
-      startImpersonation(user);
-    }
-  };
+  }, []);
 
   const fetchConfig = async () => {
     setLoading(true);
@@ -379,69 +352,6 @@ export default function SettingsPage() {
         </Card>
       )}
 
-      {/* Admin: View As User (Impersonation) */}
-      {isAdmin && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Eye className="w-5 h-5 mr-2" />
-              View As User (Testing)
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-gray-500">
-              Temporarily view the system as another user to test permissions and see what they can access.
-              Your admin session is preserved - you can stop impersonation at any time.
-            </p>
-
-            {isImpersonating ? (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <UserCheck className="w-5 h-5 text-yellow-600 mr-2" />
-                    <span className="text-yellow-800">
-                      Currently viewing as another user
-                    </span>
-                  </div>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={stopImpersonation}
-                  >
-                    Stop Viewing As
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-end space-x-4">
-                <div className="flex-1">
-                  <Select
-                    label="Select User"
-                    value={selectedUserId}
-                    onChange={(e) => setSelectedUserId(e.target.value)}
-                    options={[
-                      { value: '', label: 'Select a user...' },
-                      ...users
-                        .filter(u => u.id !== realUserProfile?.id)
-                        .map(u => ({
-                          value: u.id,
-                          label: `${u.full_name} (${u.role.replace(/_/g, ' ')})`,
-                        })),
-                    ]}
-                  />
-                </div>
-                <Button
-                  onClick={handleImpersonate}
-                  disabled={!selectedUserId}
-                >
-                  <Eye className="w-4 h-4 mr-2" />
-                  View As User
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }
