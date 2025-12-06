@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Save, RefreshCw, Eye, UserCheck } from 'lucide-react';
+import { Save, RefreshCw, Eye, UserCheck, Calendar, Play } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { SystemConfig, User } from '@/types/database';
@@ -46,6 +46,8 @@ export default function SettingsPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string>('');
+  const [generating, setGenerating] = useState(false);
+  const [generateResult, setGenerateResult] = useState<{ message: string; visits: string[] } | null>(null);
   const supabase = createClient();
 
   // Check if the REAL user is admin (not impersonated role)
@@ -147,6 +149,43 @@ export default function SettingsPage() {
       recommendations_review_days: '7',
       technical_review_days: '7',
     });
+  };
+
+  const handleGenerateVisits = async () => {
+    setGenerating(true);
+    setGenerateResult(null);
+    setError(null);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Not authenticated');
+      }
+
+      const response = await fetch('/api/visits/generate', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to generate visits');
+      }
+
+      setGenerateResult({
+        message: data.message,
+        visits: data.visits || [],
+      });
+      setSuccess(data.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      setError(message);
+    } finally {
+      setGenerating(false);
+    }
   };
 
   if (loading) {
@@ -288,6 +327,57 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Admin: Generate Visits */}
+      {isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <Calendar className="w-5 h-5 mr-2" />
+              Visit Generation
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-gray-500">
+              Generate maintenance visits from active routines. This checks all active maintenance plans
+              and creates visits for any scheduled dates within the call horizon that don&apos;t already have visits.
+            </p>
+
+            <div className="flex items-center space-x-4">
+              <Button
+                onClick={handleGenerateVisits}
+                loading={generating}
+                disabled={generating}
+              >
+                <Play className="w-4 h-4 mr-2" />
+                Generate Visits Now
+              </Button>
+            </div>
+
+            {generateResult && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <p className="font-medium text-green-800">{generateResult.message}</p>
+                {generateResult.visits.length > 0 && (
+                  <ul className="mt-2 text-sm text-green-700 list-disc list-inside">
+                    {generateResult.visits.map((visit, i) => (
+                      <li key={i}>{visit}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            <div className="text-xs text-gray-400 border-t pt-4">
+              <p className="font-medium mb-1">Automation:</p>
+              <p>For automatic visit generation, set up a cron job to call:</p>
+              <code className="block bg-gray-100 p-2 rounded mt-1">
+                POST /api/visits/generate
+              </code>
+              <p className="mt-1">with header: Authorization: Bearer YOUR_CRON_SECRET</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Admin: View As User (Impersonation) */}
       {isAdmin && (
