@@ -115,23 +115,25 @@ export default function ReportsPage() {
         .gte('created_at', startDate.toISOString())
         .lte('created_at', endDate.toISOString());
 
-      // Calculate stats
-      const visits = visitsData || [];
-      const recommendations = recommendationsData || [];
+      // Calculate stats - use 'as unknown as' to handle Supabase nested query types
+      type VisitRow = { status: string; scheduled_date: string; routine?: { vendor?: { name: string } } };
+      type RecRow = { status: string; due_date: string | null; completed_at: string | null; created_at: string; visit?: { routine?: { vendor?: { name: string } } } };
+      const visits = (visitsData || []) as unknown as VisitRow[];
+      const recommendations = (recommendationsData || []) as unknown as RecRow[];
 
-      const completedVisits = visits.filter(v => v.status === 'completed').length;
-      const pendingVisits = visits.filter(v => !['completed', 'cancelled'].includes(v.status)).length;
+      const completedVisits = visits.filter((v) => v.status === 'completed').length;
+      const pendingVisits = visits.filter((v) => !['completed', 'cancelled'].includes(v.status)).length;
 
-      const completedRecs = recommendations.filter(r => r.status === 'completed').length;
-      const openRecs = recommendations.filter(r => r.status === 'open').length;
-      const overdueRecs = recommendations.filter(r =>
+      const completedRecs = recommendations.filter((r) => r.status === 'completed').length;
+      const openRecs = recommendations.filter((r) => r.status === 'open').length;
+      const overdueRecs = recommendations.filter((r) =>
         r.due_date &&
         new Date(r.due_date) < new Date() &&
         !['completed', 'cancelled'].includes(r.status)
       ).length;
 
       // Calculate average completion days
-      const completedWithDates = recommendations.filter(r => r.completed_at && r.created_at);
+      const completedWithDates = recommendations.filter((r) => r.completed_at && r.created_at);
       const avgDays = completedWithDates.length > 0
         ? completedWithDates.reduce((acc, r) => {
             const days = (new Date(r.completed_at!).getTime() - new Date(r.created_at).getTime()) / (1000 * 60 * 60 * 24);
@@ -152,9 +154,8 @@ export default function ReportsPage() {
 
       // Calculate vendor stats
       const vendorMap = new Map<string, VendorStats>();
-      visits.forEach(v => {
-        const routine = v.routine as unknown as { vendor: { name: string } } | undefined;
-        const vendorName = routine?.vendor?.name || 'Unknown';
+      visits.forEach((v) => {
+        const vendorName = v.routine?.vendor?.name || 'Unknown';
         if (!vendorMap.has(vendorName)) {
           vendorMap.set(vendorName, { name: vendorName, visits: 0, recommendations: 0, completed: 0 });
         }
@@ -163,9 +164,8 @@ export default function ReportsPage() {
         if (v.status === 'completed') vendor.completed++;
       });
 
-      recommendations.forEach(r => {
-        const visit = r.visit as unknown as { routine: { vendor: { name: string } } } | undefined;
-        const vendorName = visit?.routine?.vendor?.name || 'Unknown';
+      recommendations.forEach((r) => {
+        const vendorName = r.visit?.routine?.vendor?.name || 'Unknown';
         if (vendorMap.has(vendorName)) {
           vendorMap.get(vendorName)!.recommendations++;
         }

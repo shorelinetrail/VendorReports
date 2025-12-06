@@ -83,7 +83,7 @@ export default function DashboardPage() {
         ]);
 
         const today = new Date();
-        const overdueTasks = tasksRes.data?.filter(t =>
+        const overdueTasks = tasksRes.data?.filter((t: { due_date: string; status: string }) =>
           isBefore(new Date(t.due_date), today) && t.status !== 'completed'
         ).length || 0;
 

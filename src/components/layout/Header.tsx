@@ -67,7 +67,8 @@ export default function Header({ onMenuClick }: HeaderProps) {
         .order('due_date', { ascending: true })
         .limit(5);
 
-      tasks?.forEach((task) => {
+      type TaskRow = { id: string; task_type: string; due_date: string; status: string; visit: unknown };
+      (tasks as TaskRow[] | null)?.forEach((task) => {
         const isOverdue = isBefore(new Date(task.due_date), today);
         const taskTypeLabels: Record<string, string> = {
           confirm_visit_date: 'Confirm Visit Date',
@@ -77,7 +78,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
           technical_review: 'Technical Review',
         };
 
-        const visit = task.visit as unknown as { id: string; routine: { plan_number: string } } | null;
+        const visit = task.visit as { id: string; routine: { plan_number: string } } | null;
         notifs.push({
           id: `task-${task.id}`,
           type: 'task',
@@ -107,7 +108,8 @@ export default function Header({ onMenuClick }: HeaderProps) {
           .order('created_at', { ascending: false })
           .limit(3);
 
-        recs?.forEach((rec) => {
+        type RecRow = { id: string; description: string; due_date: string | null; status: string; visit: unknown };
+        (recs as RecRow[] | null)?.forEach((rec) => {
           const isOverdue = rec.due_date ? isBefore(new Date(rec.due_date), today) : false;
           notifs.push({
             id: `rec-${rec.id}`,

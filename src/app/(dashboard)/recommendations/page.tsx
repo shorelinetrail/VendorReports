@@ -154,7 +154,7 @@ export default function RecommendationsPage() {
 
       // If all recommendations are completed or cancelled, mark the visit as completed
       const allDone = visitRecs?.every(
-        r => r.id === id || r.status === 'completed' || r.status === 'cancelled'
+        (r: { id: string; status: string }) => r.id === id || r.status === 'completed' || r.status === 'cancelled'
       );
 
       if (allDone && visitRecs && visitRecs.length > 0) {
