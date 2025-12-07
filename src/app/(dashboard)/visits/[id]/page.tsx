@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check, RefreshCw, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check, RefreshCw, RotateCcw, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -28,6 +28,10 @@ interface VisitDetails extends Omit<MaintenanceVisit, 'routine' | 'vendor_coordi
   vendor_coordinator: { id: string; full_name: string; email: string };
   maintenance_engineer: { id: string; full_name: string; email: string };
   technical_engineer: { id: string; full_name: string; email: string };
+  // Reschedule fields (from migration 003)
+  reschedule_reason?: string | null;
+  rescheduled_at?: string | null;
+  rescheduled_from?: string | null;
 }
 
 interface RecommendationWithCreator extends Omit<Recommendation, 'created_by' | 'reviewed_by'> {
@@ -925,6 +929,141 @@ export default function VisitDetailPage() {
               </TableBody>
             </Table>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Activity Log */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center">
+            <Clock className="w-5 h-5 mr-2" />
+            Activity Log
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {/* Build activity log from visit data */}
+            {(() => {
+              const activities: { date: string; event: string; details?: string }[] = [];
+
+              // Visit created
+              if (visit.created_at) {
+                activities.push({
+                  date: visit.created_at,
+                  event: 'Visit created',
+                  details: `Scheduled for ${format(new Date(visit.scheduled_date), 'MMMM d, yyyy')}`,
+                });
+              }
+
+              // Date confirmed
+              if (visit.confirmed_date) {
+                activities.push({
+                  date: visit.confirmed_date,
+                  event: 'Visit date confirmed',
+                  details: `Confirmed for ${format(new Date(visit.confirmed_date), 'MMMM d, yyyy')}`,
+                });
+              }
+
+              // Rescheduled
+              if (visit.rescheduled_at) {
+                activities.push({
+                  date: visit.rescheduled_at,
+                  event: 'Visit rescheduled',
+                  details: visit.reschedule_reason
+                    ? `From ${visit.rescheduled_from ? format(new Date(visit.rescheduled_from), 'MMM d, yyyy') : 'previous date'}. Reason: ${visit.reschedule_reason}`
+                    : undefined,
+                });
+              }
+
+              // Report uploaded
+              if (visit.report_uploaded_at) {
+                activities.push({
+                  date: visit.report_uploaded_at,
+                  event: 'Maintenance report uploaded',
+                });
+              }
+
+              // Recommendations created
+              recommendations.forEach(rec => {
+                activities.push({
+                  date: rec.created_at,
+                  event: 'Recommendation created',
+                  details: rec.description.substring(0, 100) + (rec.description.length > 100 ? '...' : ''),
+                });
+
+                if (rec.reviewed_at) {
+                  activities.push({
+                    date: rec.reviewed_at,
+                    event: 'Recommendation reviewed',
+                    details: `By ${rec.reviewed_by?.full_name || 'Technical Engineer'}`,
+                  });
+                }
+
+                if (rec.completed_at) {
+                  activities.push({
+                    date: rec.completed_at,
+                    event: 'Recommendation completed',
+                    details: rec.description.substring(0, 50) + (rec.description.length > 50 ? '...' : ''),
+                  });
+                }
+
+                if (rec.cancelled_at) {
+                  activities.push({
+                    date: rec.cancelled_at,
+                    event: 'Recommendation cancelled',
+                    details: rec.cancellation_reason || undefined,
+                  });
+                }
+              });
+
+              // Tasks completed
+              tasks.filter(t => t.completed_at).forEach(task => {
+                const taskLabels: Record<string, string> = {
+                  confirm_visit_date: 'Confirm visit date task',
+                  upload_report: 'Upload report task',
+                  create_recommendations: 'Create recommendations task',
+                  review_recommendations: 'Review recommendations task',
+                  technical_review: 'Technical review task',
+                  close_visit: 'Close visit task',
+                };
+                activities.push({
+                  date: task.completed_at!,
+                  event: `${taskLabels[task.task_type] || task.task_type} completed`,
+                });
+              });
+
+              // Sort by date descending (most recent first)
+              activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+              if (activities.length === 0) {
+                return <p className="text-gray-500 text-center py-4">No activity recorded yet.</p>;
+              }
+
+              return (
+                <div className="relative">
+                  <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
+                  <div className="space-y-4">
+                    {activities.map((activity, idx) => (
+                      <div key={idx} className="relative pl-10">
+                        <div className="absolute left-2.5 w-3 h-3 bg-primary-500 rounded-full border-2 border-white" />
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <div className="flex items-center justify-between">
+                            <p className="font-medium text-gray-900">{activity.event}</p>
+                            <p className="text-sm text-gray-500">
+                              {format(new Date(activity.date), 'MMM d, yyyy h:mm a')}
+                            </p>
+                          </div>
+                          {activity.details && (
+                            <p className="text-sm text-gray-600 mt-1">{activity.details}</p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
         </CardContent>
       </Card>
 
