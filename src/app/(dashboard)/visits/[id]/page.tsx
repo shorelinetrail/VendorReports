@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check, RefreshCw, RotateCcw } from 'lucide-react';
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -455,6 +455,30 @@ export default function VisitDetailPage() {
     }
   };
 
+  const handleReopenVisit = async () => {
+    if (!confirm('Are you sure you want to reopen this visit? This will allow adding new recommendations.')) {
+      return;
+    }
+
+    try {
+      // Determine the appropriate status based on recommendations
+      const hasInReviewRecs = recommendations.some(r => r.status === 'in_review');
+      const newStatus: VisitStatus = hasInReviewRecs ? 'in_review' : 'recommendations_created';
+
+      const { error: visitError } = await supabase
+        .from('maintenance_visits')
+        .update({ status: newStatus })
+        .eq('id', visitId);
+
+      if (visitError) throw visitError;
+
+      await fetchVisitData();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      alert(message);
+    }
+  };
+
   const handleRescheduleVisit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!visit) return;
@@ -593,7 +617,10 @@ export default function VisitDetailPage() {
 
   const canConfirmDate = userProfile?.id === visit.vendor_coordinator_id || hasRole('admin');
   const canUploadReport = (userProfile?.id === visit.vendor_coordinator_id || hasRole('admin')) && visit.status === 'date_confirmed';
-  const canCreateRecommendation = (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && visit.report_file_path;
+  const canCreateRecommendation = (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin'))
+    && visit.report_file_path
+    && visit.status !== 'completed'
+    && visit.status !== 'cancelled';
   const canReview = userProfile?.id === visit.technical_engineer_id || hasRole('admin');
   const canReschedule = (userProfile?.id === visit.vendor_coordinator_id || hasRole('admin'))
     && visit.status !== 'completed'
@@ -607,6 +634,9 @@ export default function VisitDetailPage() {
     && visit.status !== 'completed'
     && visit.status !== 'cancelled'
     && allRecommendationsDone;
+
+  // Check if admin can reopen a completed visit
+  const canReopenVisit = hasRole('admin') && visit.status === 'completed';
 
   return (
     <div className="space-y-6">
@@ -784,9 +814,17 @@ export default function VisitDetailPage() {
               </Button>
             )}
             {visit.status === 'completed' && (
-              <div className="flex items-center text-green-600">
-                <CheckCircle className="w-5 h-5 mr-2" />
-                <span className="font-medium">Visit Completed</span>
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center text-green-600">
+                  <CheckCircle className="w-5 h-5 mr-2" />
+                  <span className="font-medium">Visit Completed</span>
+                </div>
+                {canReopenVisit && (
+                  <Button variant="secondary" onClick={handleReopenVisit}>
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    Reopen Visit
+                  </Button>
+                )}
               </div>
             )}
           </div>
