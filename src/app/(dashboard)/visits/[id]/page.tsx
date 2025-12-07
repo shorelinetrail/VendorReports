@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check, RefreshCw, RotateCcw, Clock } from 'lucide-react';
+import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check, RefreshCw, RotateCcw, Clock, FileX } from 'lucide-react';
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -60,6 +60,8 @@ export default function VisitDetailPage() {
   const [reviewResponse, setReviewResponse] = useState('');
   const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
   const [rescheduleData, setRescheduleData] = useState({ new_date: '', reason: '' });
+  const [noReportModalOpen, setNoReportModalOpen] = useState(false);
+  const [noReportReason, setNoReportReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -554,6 +556,39 @@ export default function VisitDetailPage() {
     }
   };
 
+  const handleNoReportAvailable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!noReportReason.trim()) return;
+
+    setError(null);
+    setSuccess(null);
+    setSubmitting(true);
+
+    try {
+      const { error: updateError } = await supabase
+        .from('maintenance_visits')
+        .update({
+          no_report_reason: noReportReason,
+          status: 'report_uploaded' as VisitStatus,
+        })
+        .eq('id', visitId);
+
+      if (updateError) throw updateError;
+
+      setSuccess('Marked as no report available');
+      await fetchVisitData();
+      setTimeout(() => {
+        setNoReportModalOpen(false);
+        setNoReportReason('');
+      }, 1000);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   // Calculate workflow step based on status
   const getWorkflowStep = (status: VisitStatus): number => {
     const steps: Record<VisitStatus, number> = {
@@ -755,6 +790,11 @@ export default function VisitDetailPage() {
                     <Download className="w-4 h-4 mr-1" />
                     Download
                   </Button>
+                ) : visit.no_report_reason ? (
+                  <div>
+                    <p className="text-amber-600 font-medium">No report available</p>
+                    <p className="text-sm text-gray-500">{visit.no_report_reason}</p>
+                  </div>
                 ) : (
                   <p className="text-gray-400">Not uploaded</p>
                 )}
@@ -801,10 +841,16 @@ export default function VisitDetailPage() {
               </Button>
             )}
             {canUploadReport && (
-              <Button onClick={() => setUploadModalOpen(true)}>
-                <Upload className="w-4 h-4 mr-2" />
-                Upload Report
-              </Button>
+              <>
+                <Button onClick={() => setUploadModalOpen(true)}>
+                  <Upload className="w-4 h-4 mr-2" />
+                  Upload Report
+                </Button>
+                <Button variant="secondary" onClick={() => setNoReportModalOpen(true)}>
+                  <FileX className="w-4 h-4 mr-2" />
+                  No Report Available
+                </Button>
+              </>
             )}
             {canCreateRecommendation && (
               <Button onClick={() => setRecommendationModalOpen(true)}>
@@ -986,11 +1032,17 @@ export default function VisitDetailPage() {
                 });
               }
 
-              // Report uploaded
+              // Report uploaded or marked as unavailable
               if (visit.report_uploaded_at) {
                 activities.push({
                   date: visit.report_uploaded_at,
                   event: 'Maintenance report uploaded',
+                });
+              } else if (visit.no_report_reason) {
+                activities.push({
+                  date: visit.updated_at,
+                  event: 'Marked as no report available',
+                  details: visit.no_report_reason,
                 });
               }
 
@@ -1237,6 +1289,41 @@ export default function VisitDetailPage() {
             </Button>
             <Button type="submit" loading={submitting}>
               Reschedule Visit
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* No Report Available Modal */}
+      <Modal
+        isOpen={noReportModalOpen}
+        onClose={() => setNoReportModalOpen(false)}
+        title="No Report Available"
+      >
+        <form onSubmit={handleNoReportAvailable} className="space-y-4">
+          {error && <Alert variant="error">{error}</Alert>}
+          {success && <Alert variant="success">{success}</Alert>}
+
+          <p className="text-sm text-gray-600">
+            Please provide a reason why no maintenance report is available for this visit.
+          </p>
+
+          <Textarea
+            label="Reason"
+            name="no_report_reason"
+            value={noReportReason}
+            onChange={(e) => setNoReportReason(e.target.value)}
+            required
+            placeholder="e.g., Visit was cancelled by vendor, No work performed, etc."
+            rows={3}
+          />
+
+          <div className="flex justify-end space-x-3 pt-4 border-t">
+            <Button type="button" variant="secondary" onClick={() => setNoReportModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" loading={submitting} disabled={!noReportReason.trim()}>
+              Confirm
             </Button>
           </div>
         </form>

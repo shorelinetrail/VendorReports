@@ -70,6 +70,7 @@ export interface MaintenanceVisit {
   technical_engineer?: User;
   report_file_path: string | null;
   report_uploaded_at: string | null;
+  no_report_reason: string | null;
   created_at: string;
   updated_at: string;
 }
