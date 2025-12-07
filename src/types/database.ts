@@ -14,6 +14,8 @@ export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'overdue' | '
 
 export type RecommendationStatus = 'open' | 'in_review' | 'approved' | 'completed' | 'cancelled';
 
+export type ReviewDecisionType = 'no_action' | 'request_sap' | 'other_action';
+
 export interface User {
   id: string;
   email: string;
@@ -102,6 +104,10 @@ export interface Recommendation {
   created_by?: User;
   sent_for_review: boolean;
   technical_review_response: string | null;
+  review_decision: ReviewDecisionType | null;
+  review_action_description: string | null;
+  action_assigned_to_id: string | null;
+  action_assigned_to?: User;
   reviewed_by_id: string | null;
   reviewed_by?: User;
   reviewed_at: string | null;
@@ -166,8 +172,8 @@ export interface Database {
       };
       recommendations: {
         Row: Recommendation;
-        Insert: Omit<Recommendation, 'id' | 'created_at' | 'updated_at' | 'visit' | 'created_by' | 'reviewed_by'>;
-        Update: Partial<Omit<Recommendation, 'id' | 'created_at' | 'updated_at' | 'visit' | 'created_by' | 'reviewed_by'>>;
+        Insert: Omit<Recommendation, 'id' | 'created_at' | 'updated_at' | 'visit' | 'created_by' | 'reviewed_by' | 'action_assigned_to'>;
+        Update: Partial<Omit<Recommendation, 'id' | 'created_at' | 'updated_at' | 'visit' | 'created_by' | 'reviewed_by' | 'action_assigned_to'>>;
       };
       system_config: {
         Row: SystemConfig;

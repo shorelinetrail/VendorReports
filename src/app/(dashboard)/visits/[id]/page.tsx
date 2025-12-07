@@ -6,7 +6,7 @@ import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, 
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { MaintenanceVisit, Recommendation, Task, VisitStatus, RecommendationStatus, VisitReport, User } from '@/types/database';
+import { MaintenanceVisit, Recommendation, Task, VisitStatus, RecommendationStatus, VisitReport, User, ReviewDecisionType } from '@/types/database';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
 import Input from '@/components/ui/Input';
@@ -35,9 +35,10 @@ interface VisitDetails extends Omit<MaintenanceVisit, 'routine' | 'vendor_coordi
   rescheduled_from?: string | null;
 }
 
-interface RecommendationWithCreator extends Omit<Recommendation, 'created_by' | 'reviewed_by'> {
+interface RecommendationWithCreator extends Omit<Recommendation, 'created_by' | 'reviewed_by' | 'action_assigned_to'> {
   created_by: { full_name: string };
   reviewed_by?: { full_name: string } | null;
+  action_assigned_to?: { id: string; full_name: string } | null;
 }
 
 interface VisitReportWithUploader extends Omit<VisitReport, 'uploaded_by' | 'visit'> {
@@ -65,6 +66,9 @@ export default function VisitDetailPage() {
     due_date: '',
   });
   const [reviewResponse, setReviewResponse] = useState('');
+  const [reviewDecision, setReviewDecision] = useState<ReviewDecisionType | ''>('');
+  const [reviewActionDescription, setReviewActionDescription] = useState('');
+  const [reviewAssignToId, setReviewAssignToId] = useState('');
   const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
   const [rescheduleData, setRescheduleData] = useState({ new_date: '', reason: '' });
   const [noReportModalOpen, setNoReportModalOpen] = useState(false);
@@ -128,7 +132,8 @@ export default function VisitDetailPage() {
           .select(`
             *,
             created_by:users!recommendations_created_by_id_fkey(full_name),
-            reviewed_by:users!recommendations_reviewed_by_id_fkey(full_name)
+            reviewed_by:users!recommendations_reviewed_by_id_fkey(full_name),
+            action_assigned_to:users!recommendations_action_assigned_to_id_fkey(id, full_name)
           `)
           .eq('visit_id', visitId)
           .order('created_at', { ascending: false }),
@@ -434,20 +439,28 @@ export default function VisitDetailPage() {
 
   const handleSubmitReview = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedRecommendation || !userProfile) return;
+    if (!selectedRecommendation || !userProfile || !reviewDecision) return;
 
     setError(null);
     setSuccess(null);
     setSubmitting(true);
 
     try {
+      // Determine status based on decision
+      // If no_action, mark as completed. Otherwise, mark as approved (needs action)
+      const newStatus: RecommendationStatus = reviewDecision === 'no_action' ? 'completed' : 'approved';
+
       const { error } = await supabase
         .from('recommendations')
         .update({
           technical_review_response: reviewResponse,
+          review_decision: reviewDecision as ReviewDecisionType,
+          review_action_description: reviewDecision === 'other_action' ? reviewActionDescription : null,
+          action_assigned_to_id: reviewDecision !== 'no_action' ? reviewAssignToId || null : null,
           reviewed_by_id: userProfile.id,
           reviewed_at: new Date().toISOString(),
-          status: 'approved' as RecommendationStatus,
+          status: newStatus,
+          completed_at: reviewDecision === 'no_action' ? new Date().toISOString() : null,
         })
         .eq('id', selectedRecommendation.id);
 
@@ -471,6 +484,9 @@ export default function VisitDetailPage() {
         setReviewModalOpen(false);
         setSelectedRecommendation(null);
         setReviewResponse('');
+        setReviewDecision('');
+        setReviewActionDescription('');
+        setReviewAssignToId('');
       }, 1000);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
@@ -1126,10 +1142,27 @@ export default function VisitDetailPage() {
                   <TableRow key={rec.id}>
                     <TableCell className="max-w-xs">
                       <p className="truncate">{rec.description}</p>
-                      {rec.technical_review_response && (
-                        <p className="text-sm text-gray-500 truncate mt-1">
-                          Review: {rec.technical_review_response}
-                        </p>
+                      {rec.review_decision && (
+                        <div className="mt-2 space-y-1">
+                          <div className="flex items-center gap-2">
+                            <Badge variant={rec.review_decision === 'no_action' ? 'completed' : 'in_progress'}>
+                              {rec.review_decision === 'no_action' && 'No Action'}
+                              {rec.review_decision === 'request_sap' && 'SAP Requested'}
+                              {rec.review_decision === 'other_action' && 'Action Required'}
+                            </Badge>
+                            {rec.action_assigned_to && (
+                              <span className="text-xs text-gray-500">
+                                → {rec.action_assigned_to.full_name}
+                              </span>
+                            )}
+                          </div>
+                          {rec.review_action_description && (
+                            <p className="text-xs text-gray-600">{rec.review_action_description}</p>
+                          )}
+                          {rec.technical_review_response && (
+                            <p className="text-xs text-gray-500 italic">&quot;{rec.technical_review_response}&quot;</p>
+                          )}
+                        </div>
                       )}
                     </TableCell>
                     <TableCell>{rec.sap_notification_number || '-'}</TableCell>
@@ -1464,21 +1497,60 @@ export default function VisitDetailPage() {
             <p className="font-medium">{selectedRecommendation?.description}</p>
           </div>
 
+          <Select
+            label="Decision"
+            name="review_decision"
+            value={reviewDecision}
+            onChange={(e) => setReviewDecision(e.target.value as ReviewDecisionType | '')}
+            required
+            placeholder="Select your decision"
+            options={[
+              { value: 'no_action', label: 'No Further Action Required' },
+              { value: 'request_sap', label: 'Request SAP Notification' },
+              { value: 'other_action', label: 'Other Action Required' },
+            ]}
+          />
+
+          {reviewDecision === 'other_action' && (
+            <Textarea
+              label="Action Description"
+              name="action_description"
+              value={reviewActionDescription}
+              onChange={(e) => setReviewActionDescription(e.target.value)}
+              required
+              placeholder="Describe the action required..."
+              rows={2}
+            />
+          )}
+
+          {reviewDecision && reviewDecision !== 'no_action' && (
+            <Select
+              label="Assign Action To"
+              name="assign_to"
+              value={reviewAssignToId}
+              onChange={(e) => setReviewAssignToId(e.target.value)}
+              placeholder="Select who should take action"
+              options={users.map(user => ({ value: user.id, label: `${user.full_name} (${user.role.replace(/_/g, ' ')})` }))}
+            />
+          )}
+
           <Textarea
-            label="Review Response"
+            label={reviewDecision === 'no_action' ? 'Justification' : 'Comments'}
             name="review_response"
             value={reviewResponse}
             onChange={(e) => setReviewResponse(e.target.value)}
             required
-            placeholder="Provide your technical review response..."
-            rows={4}
+            placeholder={reviewDecision === 'no_action'
+              ? 'Provide justification for no further action...'
+              : 'Add any additional comments...'}
+            rows={3}
           />
 
           <div className="flex justify-end space-x-3 pt-4 border-t">
             <Button type="button" variant="secondary" onClick={() => setReviewModalOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit" loading={submitting}>
+            <Button type="submit" loading={submitting} disabled={!reviewDecision}>
               Submit Review
             </Button>
           </div>
