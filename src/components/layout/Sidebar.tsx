@@ -22,7 +22,8 @@ const navigation = [
   { name: 'Maintenance Routines', href: '/routines', icon: Calendar, roles: ['admin', 'vendor_coordinator', 'maintenance_engineer', 'technical_engineer'] },
   { name: 'Visits', href: '/visits', icon: ClipboardList, roles: ['admin', 'vendor_coordinator', 'maintenance_engineer', 'technical_engineer'] },
   { name: 'Recommendations', href: '/recommendations', icon: FileText, roles: ['admin', 'maintenance_engineer', 'technical_engineer'] },
-  { name: 'Reports', href: '/reports', icon: BarChart3, roles: ['admin', 'vendor_coordinator', 'maintenance_engineer', 'technical_engineer'] },
+  { name: 'Maintenance Reports', href: '/reports/maintenance', icon: FileText, roles: ['admin', 'vendor_coordinator', 'maintenance_engineer', 'technical_engineer'] },
+  { name: 'Analytics', href: '/reports', icon: BarChart3, roles: ['admin', 'vendor_coordinator', 'maintenance_engineer', 'technical_engineer'] },
   { name: 'Vendors', href: '/vendors', icon: Building2, roles: ['admin'] },
   { name: 'Users', href: '/users', icon: Users, roles: ['admin'] },
   { name: 'Settings', href: '/settings', icon: Settings, roles: ['admin'] },
@@ -71,7 +72,10 @@ export default function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 px-4 py-4 space-y-1 overflow-y-auto">
         {filteredNavigation.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+          // Special case: Analytics (/reports) should only be active at exact path
+          const isActive = item.href === '/reports'
+            ? pathname === '/reports'
+            : pathname === item.href || pathname.startsWith(item.href + '/');
           return (
             <Link
               key={item.name}
