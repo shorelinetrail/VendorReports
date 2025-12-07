@@ -29,7 +29,11 @@ const navigation = [
   { name: 'Settings', href: '/settings', icon: Settings, roles: ['admin'] },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  onItemClick?: () => void;
+}
+
+export default function Sidebar({ onItemClick }: SidebarProps) {
   const pathname = usePathname();
   const { userProfile, signOut, loading } = useAuth();
 
@@ -80,6 +84,7 @@ export default function Sidebar() {
             <Link
               key={item.name}
               href={item.href}
+              onClick={onItemClick}
               className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                 isActive
                   ? 'bg-primary-600 text-white'

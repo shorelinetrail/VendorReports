@@ -137,7 +137,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         } ${showAdminBar ? 'top-10 bottom-0' : 'inset-y-0'}`}
       >
-        <Sidebar />
+        <Sidebar onItemClick={() => setSidebarOpen(false)} />
       </div>
 
       {/* Main content */}
