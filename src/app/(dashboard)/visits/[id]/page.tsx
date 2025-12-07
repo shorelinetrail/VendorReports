@@ -955,10 +955,12 @@ export default function VisitDetailPage() {
 
               // Visit created
               if (visit.created_at) {
+                // Use rescheduled_from if available to show original scheduled date
+                const originalScheduledDate = visit.rescheduled_from || visit.scheduled_date;
                 activities.push({
                   date: visit.created_at,
                   event: 'Visit created',
-                  details: `Scheduled for ${format(new Date(visit.scheduled_date), 'MMMM d, yyyy')}`,
+                  details: `Scheduled for ${format(new Date(originalScheduledDate), 'MMMM d, yyyy')}`,
                 });
               }
 
@@ -973,12 +975,14 @@ export default function VisitDetailPage() {
 
               // Rescheduled
               if (visit.rescheduled_at) {
+                let details = `From ${visit.rescheduled_from ? format(new Date(visit.rescheduled_from), 'MMM d, yyyy') : 'previous date'} to ${format(new Date(visit.scheduled_date), 'MMM d, yyyy')}`;
+                if (visit.reschedule_reason) {
+                  details += `. Reason: ${visit.reschedule_reason}`;
+                }
                 activities.push({
                   date: visit.rescheduled_at,
                   event: 'Visit rescheduled',
-                  details: visit.reschedule_reason
-                    ? `From ${visit.rescheduled_from ? format(new Date(visit.rescheduled_from), 'MMM d, yyyy') : 'previous date'}. Reason: ${visit.reschedule_reason}`
-                    : undefined,
+                  details,
                 });
               }
 
