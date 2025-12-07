@@ -6,9 +6,10 @@ interface BadgeProps {
   children: ReactNode;
   variant?: 'default' | 'pending' | 'in_progress' | 'completed' | 'overdue' | 'cancelled' | 'success' | 'warning' | 'error' | 'info';
   size?: 'sm' | 'md';
+  className?: string;
 }
 
-export default function Badge({ children, variant = 'default', size = 'md' }: BadgeProps) {
+export default function Badge({ children, variant = 'default', size = 'md', className = '' }: BadgeProps) {
   const variants = {
     default: 'bg-gray-100 text-gray-800',
     pending: 'bg-yellow-100 text-yellow-800',
@@ -28,7 +29,7 @@ export default function Badge({ children, variant = 'default', size = 'md' }: Ba
   };
 
   return (
-    <span className={`inline-flex items-center rounded-full font-medium ${variants[variant]} ${sizes[size]}`}>
+    <span className={`inline-flex items-center rounded-full font-medium ${variants[variant]} ${sizes[size]} ${className}`}>
       {children}
     </span>
   );
