@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, Eye, Upload, Download } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, addMonths } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { MaintenanceRoutine, Vendor, User } from '@/types/database';
@@ -43,11 +43,18 @@ const initialFormData: RoutineFormData = {
   requires_technical_review: true,
 };
 
+interface RoutineVisit {
+  routine_id: string;
+  scheduled_date: string;
+  status: string;
+}
+
 export default function RoutinesPage() {
   const { hasRole } = useAuth();
   const [routines, setRoutines] = useState<MaintenanceRoutine[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [routineVisits, setRoutineVisits] = useState<Record<string, RoutineVisit[]>>({});
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -69,7 +76,7 @@ export default function RoutinesPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [routinesRes, vendorsRes, usersRes] = await Promise.all([
+      const [routinesRes, vendorsRes, usersRes, visitsRes] = await Promise.all([
         supabase
           .from('maintenance_routines')
           .select(`
@@ -82,16 +89,53 @@ export default function RoutinesPage() {
           .order('plan_number'),
         supabase.from('vendors').select('*').order('name'),
         supabase.from('users').select('*').order('full_name'),
+        supabase
+          .from('maintenance_visits')
+          .select('routine_id, scheduled_date, status')
+          .order('scheduled_date', { ascending: false }),
       ]);
 
       if (routinesRes.data) setRoutines(routinesRes.data);
       if (vendorsRes.data) setVendors(vendorsRes.data);
       if (usersRes.data) setUsers(usersRes.data);
+
+      // Group visits by routine_id
+      if (visitsRes.data) {
+        const grouped: Record<string, RoutineVisit[]> = {};
+        visitsRes.data.forEach((visit: RoutineVisit) => {
+          if (!grouped[visit.routine_id]) {
+            grouped[visit.routine_id] = [];
+          }
+          grouped[visit.routine_id].push(visit);
+        });
+        setRoutineVisits(grouped);
+      }
     } catch (err) {
       console.error('Error fetching data:', err);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Calculate next due date for a routine based on visits
+  const getNextDueDate = (routine: MaintenanceRoutine): Date => {
+    const visits = routineVisits[routine.id] || [];
+
+    // Find the latest completed or scheduled visit
+    const latestVisit = visits.find(v => v.status === 'completed') || visits[0];
+
+    if (latestVisit) {
+      // If there's a completed visit, next due is that date + interval
+      // If it's just scheduled, show that scheduled date
+      if (latestVisit.status === 'completed') {
+        return addMonths(new Date(latestVisit.scheduled_date), routine.interval_months);
+      }
+      // Return the next scheduled visit date
+      return new Date(latestVisit.scheduled_date);
+    }
+
+    // No visits yet, use start_date
+    return new Date(routine.start_date);
   };
 
   const handleOpenModal = (routine?: MaintenanceRoutine) => {
@@ -400,7 +444,17 @@ export default function RoutinesPage() {
                 <TableCell className="max-w-xs truncate">{routine.description}</TableCell>
                 <TableCell>{routine.vendor?.name}</TableCell>
                 <TableCell>{routine.interval_months} months</TableCell>
-                <TableCell>{format(new Date(routine.start_date), 'MMM d, yyyy')}</TableCell>
+                <TableCell>
+                  {(() => {
+                    const nextDue = getNextDueDate(routine);
+                    const isPast = nextDue < new Date();
+                    return (
+                      <span className={isPast ? 'text-red-600 font-medium' : ''}>
+                        {format(nextDue, 'MMM d, yyyy')}
+                      </span>
+                    );
+                  })()}
+                </TableCell>
                 <TableCell>
                   <Badge variant={routine.is_active ? 'success' : 'cancelled'}>
                     {routine.is_active ? 'Active' : 'Inactive'}
