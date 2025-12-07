@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Download, Calendar, TrendingUp, PieChart, BarChart3, FileText } from 'lucide-react';
-import Link from 'next/link';
+import { Download, Calendar, TrendingUp, PieChart, BarChart3 } from 'lucide-react';
 import { format, subMonths, startOfMonth, endOfMonth, eachMonthOfInterval } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -281,12 +280,6 @@ export default function ReportsPage() {
               options={dateRangeOptions}
             />
           </div>
-          <Link href="/reports/maintenance">
-            <Button variant="secondary">
-              <FileText className="w-4 h-4 mr-2" />
-              View Reports
-            </Button>
-          </Link>
           <Button variant="secondary" onClick={handleExport}>
             <Download className="w-4 h-4 mr-2" />
             Export CSV

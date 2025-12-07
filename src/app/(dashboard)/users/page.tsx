@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Upload, Download } from 'lucide-react';
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -45,6 +45,11 @@ export default function UsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const [bulkFile, setBulkFile] = useState<File | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkSuccess, setBulkSuccess] = useState<string | null>(null);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const supabase = createClient();
 
   const isAdmin = hasRole('admin');
@@ -178,6 +183,152 @@ export default function UsersPage() {
     return variants[role];
   };
 
+  const handleDownloadTemplate = () => {
+    const csvContent = `full_name,email,role,password
+"John Doe","john@example.com","vendor_coordinator","password123"
+"Jane Smith","jane@example.com","maintenance_engineer","password456"`;
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'users_template.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleBulkUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bulkFile) return;
+
+    setBulkError(null);
+    setBulkSuccess(null);
+    setBulkSubmitting(true);
+
+    try {
+      const text = await bulkFile.text();
+      const lines = text.split('\n').filter(line => line.trim());
+
+      if (lines.length < 2) {
+        throw new Error('CSV file must have a header row and at least one data row');
+      }
+
+      // Parse header
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/"/g, ''));
+      const requiredHeaders = ['full_name', 'email', 'role', 'password'];
+      const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+      if (missingHeaders.length > 0) {
+        throw new Error(`Missing required headers: ${missingHeaders.join(', ')}`);
+      }
+
+      // Parse CSV helper function
+      const parseCSVLine = (line: string): string[] => {
+        const values: string[] = [];
+        let current = '';
+        let inQuotes = false;
+
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            values.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        values.push(current.trim());
+        return values;
+      };
+
+      const validRoles = ['admin', 'vendor_coordinator', 'maintenance_engineer', 'technical_engineer'];
+
+      // Parse and create users
+      const results: { success: number; failed: number; errors: string[] } = {
+        success: 0,
+        failed: 0,
+        errors: [],
+      };
+
+      for (let i = 1; i < lines.length; i++) {
+        const values = parseCSVLine(lines[i]);
+        const row: Record<string, string> = {};
+        headers.forEach((header, idx) => {
+          row[header] = values[idx] || '';
+        });
+
+        // Validate row
+        if (!row.full_name || !row.email || !row.role || !row.password) {
+          results.errors.push(`Row ${i + 1}: Missing required field(s)`);
+          results.failed++;
+          continue;
+        }
+
+        if (!validRoles.includes(row.role)) {
+          results.errors.push(`Row ${i + 1}: Invalid role "${row.role}". Must be one of: ${validRoles.join(', ')}`);
+          results.failed++;
+          continue;
+        }
+
+        if (row.password.length < 6) {
+          results.errors.push(`Row ${i + 1}: Password must be at least 6 characters`);
+          results.failed++;
+          continue;
+        }
+
+        // Create user via API
+        try {
+          const response = await fetch('/api/users', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              email: row.email,
+              password: row.password,
+              full_name: row.full_name,
+              role: row.role,
+            }),
+          });
+
+          const result = await response.json();
+
+          if (!response.ok) {
+            results.errors.push(`Row ${i + 1} (${row.email}): ${result.error || 'Failed to create user'}`);
+            results.failed++;
+          } else {
+            results.success++;
+          }
+        } catch (err) {
+          results.errors.push(`Row ${i + 1} (${row.email}): Network error`);
+          results.failed++;
+        }
+      }
+
+      if (results.success === 0 && results.failed > 0) {
+        throw new Error(`All users failed to create:\n${results.errors.slice(0, 5).join('\n')}${results.errors.length > 5 ? `\n... and ${results.errors.length - 5} more errors` : ''}`);
+      }
+
+      const successMessage = results.failed > 0
+        ? `Created ${results.success} users. ${results.failed} failed.`
+        : `Successfully created ${results.success} users`;
+
+      setBulkSuccess(successMessage);
+      await fetchUsers();
+      setTimeout(() => {
+        setBulkModalOpen(false);
+        setBulkFile(null);
+      }, 2000);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      setBulkError(message);
+    } finally {
+      setBulkSubmitting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -194,10 +345,16 @@ export default function UsersPage() {
           <p className="text-gray-600">Manage system users and roles</p>
         </div>
         {isAdmin && (
-          <Button onClick={() => handleOpenModal()}>
-            <Plus className="w-4 h-4 mr-2" />
-            Add User
-          </Button>
+          <div className="flex items-center space-x-2">
+            <Button variant="secondary" onClick={() => setBulkModalOpen(true)}>
+              <Upload className="w-4 h-4 mr-2" />
+              Bulk Upload
+            </Button>
+            <Button onClick={() => handleOpenModal()}>
+              <Plus className="w-4 h-4 mr-2" />
+              Add User
+            </Button>
+          </div>
         )}
       </div>
 
@@ -306,6 +463,59 @@ export default function UsersPage() {
             </Button>
             <Button type="submit" loading={submitting}>
               {editingId ? 'Update' : 'Create'} User
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Bulk Upload Modal */}
+      <Modal
+        isOpen={bulkModalOpen}
+        onClose={() => setBulkModalOpen(false)}
+        title="Bulk Upload Users"
+      >
+        <form onSubmit={handleBulkUpload} className="space-y-4">
+          {bulkError && <Alert variant="error">{bulkError}</Alert>}
+          {bulkSuccess && <Alert variant="success">{bulkSuccess}</Alert>}
+
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h4 className="font-medium text-gray-900 mb-2">CSV Format</h4>
+            <p className="text-sm text-gray-600 mb-2">
+              Upload a CSV file with the following columns:
+            </p>
+            <ul className="text-sm text-gray-600 list-disc list-inside space-y-1">
+              <li><strong>full_name</strong> (required) - User&apos;s full name</li>
+              <li><strong>email</strong> (required) - Email address</li>
+              <li><strong>role</strong> (required) - One of: admin, vendor_coordinator, maintenance_engineer, technical_engineer</li>
+              <li><strong>password</strong> (required) - At least 6 characters</li>
+            </ul>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleDownloadTemplate}
+              className="mt-3"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Download Template
+            </Button>
+          </div>
+
+          <Input
+            label="CSV File"
+            name="csv_file"
+            type="file"
+            accept=".csv"
+            onChange={(e) => setBulkFile(e.target.files?.[0] || null)}
+            required
+          />
+
+          <div className="flex justify-end space-x-3 pt-4 border-t">
+            <Button type="button" variant="secondary" onClick={() => setBulkModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" loading={bulkSubmitting} disabled={!bulkFile}>
+              Upload Users
             </Button>
           </div>
         </form>

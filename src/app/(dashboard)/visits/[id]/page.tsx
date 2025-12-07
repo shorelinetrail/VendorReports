@@ -71,6 +71,7 @@ export default function VisitDetailPage() {
 
   const fetchVisitData = async () => {
     setLoading(true);
+    setError(null);
     try {
       const [visitRes, recommendationsRes, tasksRes] = await Promise.all([
         supabase
@@ -106,11 +107,18 @@ export default function VisitDetailPage() {
           .order('due_date', { ascending: true }),
       ]);
 
+      if (visitRes.error) {
+        console.error('Error fetching visit:', visitRes.error);
+        setError(visitRes.error.message);
+        return;
+      }
+
       if (visitRes.data) setVisit(visitRes.data as unknown as VisitDetails);
       if (recommendationsRes.data) setRecommendations(recommendationsRes.data as unknown as RecommendationWithCreator[]);
       if (tasksRes.data) setTasks(tasksRes.data);
     } catch (err) {
       console.error('Error fetching visit data:', err);
+      setError(err instanceof Error ? err.message : 'An error occurred loading visit data');
     } finally {
       setLoading(false);
     }
@@ -570,6 +578,10 @@ export default function VisitDetailPage() {
     return (
       <div className="text-center py-12">
         <h2 className="text-xl font-semibold text-gray-900">Visit not found</h2>
+        {error && (
+          <p className="text-red-600 mt-2">{error}</p>
+        )}
+        <p className="text-gray-500 mt-2 text-sm">Visit ID: {visitId}</p>
         <Link href="/visits">
           <Button variant="secondary" className="mt-4">
             Back to Visits

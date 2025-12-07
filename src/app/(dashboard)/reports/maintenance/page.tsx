@@ -218,16 +218,9 @@ export default function MaintenanceReportsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Maintenance Reports</h1>
-          <p className="text-gray-600">View and download uploaded maintenance reports</p>
-        </div>
-        <Link href="/reports">
-          <Button variant="secondary">
-            View Analytics
-          </Button>
-        </Link>
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Maintenance Reports</h1>
+        <p className="text-gray-600">View and download uploaded maintenance reports</p>
       </div>
 
       {/* Filters */}
