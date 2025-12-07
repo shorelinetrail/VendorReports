@@ -62,6 +62,7 @@ export interface MaintenanceVisit {
   routine?: MaintenanceRoutine;
   scheduled_date: string;
   confirmed_date: string | null;
+  confirmed_at: string | null;
   notification_number: string | null;
   status: VisitStatus;
   vendor_coordinator_id: string;

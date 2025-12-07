@@ -182,6 +182,7 @@ export default function VisitDetailPage() {
         .from('maintenance_visits')
         .update({
           confirmed_date: confirmedDate,
+          confirmed_at: new Date().toISOString(),
           status: 'date_confirmed' as VisitStatus,
         })
         .eq('id', visitId);
@@ -1324,7 +1325,7 @@ export default function VisitDetailPage() {
               // Date confirmed
               if (visit.confirmed_date) {
                 activities.push({
-                  date: visit.confirmed_date,
+                  date: visit.confirmed_at || visit.updated_at,
                   event: 'Visit date confirmed',
                   details: `Confirmed for ${format(new Date(visit.confirmed_date), 'MMMM d, yyyy')}`,
                 });
