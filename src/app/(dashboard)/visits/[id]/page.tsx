@@ -911,76 +911,78 @@ export default function VisitDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center space-x-4">
-        <Link href="/visits">
+      <div className="flex items-start sm:items-center gap-3 sm:gap-4">
+        <Link href="/visits" className="flex-shrink-0">
           <Button variant="ghost" size="sm">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
+            <ArrowLeft className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Back</span>
           </Button>
         </Link>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">
             Visit: {visit.routine?.plan_number}
           </h1>
-          <p className="text-gray-600">{visit.routine?.description}</p>
+          <p className="text-sm sm:text-base text-gray-600 line-clamp-2">{visit.routine?.description}</p>
         </div>
       </div>
 
       {/* Workflow Progress Stepper */}
       {visit.status !== 'cancelled' && (
         <Card>
-          <CardContent className="py-6">
-            <div className="flex items-center justify-between">
-              {workflowSteps.map((step, index) => {
-                // When visit is completed, all steps should show as done (green with checkmark)
-                const isCompleted = visit.status === 'completed';
-                const isStepDone = isCompleted ? true : currentStep > step.step;
-                const isCurrentStep = !isCompleted && currentStep === step.step;
+          <CardContent className="py-4 sm:py-6 px-2 sm:px-6">
+            <div className="overflow-x-auto -mx-2 px-2 pb-2">
+              <div className="flex items-center justify-between min-w-[500px] sm:min-w-0">
+                {workflowSteps.map((step, index) => {
+                  // When visit is completed, all steps should show as done (green with checkmark)
+                  const isCompleted = visit.status === 'completed';
+                  const isStepDone = isCompleted ? true : currentStep > step.step;
+                  const isCurrentStep = !isCompleted && currentStep === step.step;
 
-                return (
-                  <div key={step.step} className="flex items-center flex-1">
-                    <div className="flex flex-col items-center">
-                      <div
-                        className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium border-2 transition-colors ${
-                          isStepDone
-                            ? 'bg-green-500 border-green-500 text-white'
-                            : isCurrentStep
-                            ? 'bg-blue-500 border-blue-500 text-white'
-                            : 'bg-white border-gray-300 text-gray-400'
-                        }`}
-                      >
-                        {isStepDone ? (
-                          <Check className="w-5 h-5" />
-                        ) : (
-                          step.step
-                        )}
-                      </div>
-                      <div className="mt-2 text-center">
-                        <p
-                          className={`text-xs font-medium ${
-                            isStepDone || isCurrentStep ? 'text-gray-900' : 'text-gray-400'
+                  return (
+                    <div key={step.step} className="flex items-center flex-1">
+                      <div className="flex flex-col items-center">
+                        <div
+                          className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-xs sm:text-sm font-medium border-2 transition-colors ${
+                            isStepDone
+                              ? 'bg-green-500 border-green-500 text-white'
+                              : isCurrentStep
+                              ? 'bg-blue-500 border-blue-500 text-white'
+                              : 'bg-white border-gray-300 text-gray-400'
                           }`}
                         >
-                          {step.label}
-                        </p>
-                        <p className="text-xs text-gray-500 hidden sm:block">{step.description}</p>
+                          {isStepDone ? (
+                            <Check className="w-4 h-4 sm:w-5 sm:h-5" />
+                          ) : (
+                            step.step
+                          )}
+                        </div>
+                        <div className="mt-1 sm:mt-2 text-center max-w-[60px] sm:max-w-none">
+                          <p
+                            className={`text-[10px] sm:text-xs font-medium leading-tight ${
+                              isStepDone || isCurrentStep ? 'text-gray-900' : 'text-gray-400'
+                            }`}
+                          >
+                            {step.label}
+                          </p>
+                          <p className="text-xs text-gray-500 hidden sm:block">{step.description}</p>
+                        </div>
                       </div>
+                      {index < workflowSteps.length - 1 && (
+                        <div
+                          className={`flex-1 h-0.5 sm:h-1 mx-1 sm:mx-2 ${
+                            isCompleted || currentStep > step.step ? 'bg-green-500' : 'bg-gray-200'
+                          }`}
+                        />
+                      )}
                     </div>
-                    {index < workflowSteps.length - 1 && (
-                      <div
-                        className={`flex-1 h-1 mx-2 ${
-                          isCompleted || currentStep > step.step ? 'bg-green-500' : 'bg-gray-200'
-                        }`}
-                      />
-                    )}
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
             {waitingFor && (
-              <div className="mt-4 pt-4 border-t border-gray-200">
-                <div className="flex items-center justify-center text-sm flex-wrap gap-1">
-                  <Clock className="w-4 h-4 text-amber-500 mr-1" />
+              <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-gray-200">
+                <div className="flex items-center justify-center text-xs sm:text-sm flex-wrap gap-1 text-center">
+                  <Clock className="w-4 h-4 text-amber-500 flex-shrink-0" />
                   <span className="text-gray-600">Waiting for</span>
                   <span className="font-medium text-gray-900">{waitingFor.name}</span>
                   <span className="text-gray-600">{waitingFor.action}</span>
@@ -992,63 +994,66 @@ export default function VisitDetailPage() {
       )}
 
       {/* Visit Details */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Visit Information</CardTitle>
+          <CardHeader className="pb-2 sm:pb-4">
+            <CardTitle className="text-base sm:text-lg">Visit Information</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div>
-                <p className="text-sm text-gray-500">Vendor</p>
-                <p className="font-medium">{visit.routine?.vendor?.name}</p>
+                <p className="text-xs sm:text-sm text-gray-500">Vendor</p>
+                <p className="font-medium text-sm sm:text-base">{visit.routine?.vendor?.name}</p>
               </div>
               <div>
-                <p className="text-sm text-gray-500">Status</p>
+                <p className="text-xs sm:text-sm text-gray-500">Status</p>
                 <Badge variant={getStatusVariant(visit.status)}>
                   {visit.status.replace(/_/g, ' ')}
                 </Badge>
               </div>
               <div>
-                <p className="text-sm text-gray-500">Scheduled Date</p>
-                <p className="font-medium">{format(new Date(visit.scheduled_date), 'MMMM d, yyyy')}</p>
+                <p className="text-xs sm:text-sm text-gray-500">Scheduled Date</p>
+                <p className="font-medium text-sm sm:text-base">{format(new Date(visit.scheduled_date), 'MMM d, yyyy')}</p>
               </div>
               <div>
-                <p className="text-sm text-gray-500">Confirmed Date</p>
-                <p className="font-medium">
+                <p className="text-xs sm:text-sm text-gray-500">Confirmed Date</p>
+                <p className="font-medium text-sm sm:text-base">
                   {visit.confirmed_date
-                    ? format(new Date(visit.confirmed_date), 'MMMM d, yyyy')
+                    ? format(new Date(visit.confirmed_date), 'MMM d, yyyy')
                     : 'Not confirmed'}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-gray-500">Notification Number</p>
-                <p className="font-medium">{visit.notification_number || '-'}</p>
+                <p className="text-xs sm:text-sm text-gray-500">Notification Number</p>
+                <p className="font-medium text-sm sm:text-base">{visit.notification_number || '-'}</p>
               </div>
-              <div className="col-span-2">
-                <p className="text-sm text-gray-500 mb-2">Reports ({visitReports.length})</p>
+              <div className="sm:col-span-2">
+                <p className="text-xs sm:text-sm text-gray-500 mb-2">Reports ({visitReports.length})</p>
                 {visitReports.length > 0 ? (
                   <div className="space-y-2">
                     {visitReports.map((report) => (
-                      <div key={report.id} className="flex items-center justify-between bg-gray-50 rounded-lg p-2">
-                        <div className="flex items-center space-x-3 flex-1 min-w-0">
-                          <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                      <div key={report.id} className="flex items-start sm:items-center justify-between bg-gray-50 rounded-lg p-2 gap-2">
+                        <div className="flex items-start sm:items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                          <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400 flex-shrink-0 mt-0.5 sm:mt-0" />
                           <div className="min-w-0">
-                            <p className="font-medium text-sm truncate">{report.file_name}</p>
-                            <p className="text-xs text-gray-500">
-                              Uploaded by {report.uploaded_by?.full_name} on {format(new Date(report.uploaded_at), 'MMM d, yyyy h:mm a')}
+                            <p className="font-medium text-xs sm:text-sm truncate">{report.file_name}</p>
+                            <p className="text-[10px] sm:text-xs text-gray-500">
+                              <span className="hidden sm:inline">Uploaded by {report.uploaded_by?.full_name} on </span>
+                              <span className="sm:hidden">{report.uploaded_by?.full_name} - </span>
+                              {format(new Date(report.uploaded_at), 'MMM d, yyyy')}
                             </p>
                             {report.notes && (
-                              <p className="text-xs text-gray-500 mt-1">{report.notes}</p>
+                              <p className="text-[10px] sm:text-xs text-gray-500 mt-1 line-clamp-2">{report.notes}</p>
                             )}
                           </div>
                         </div>
-                        <div className="flex items-center space-x-1 flex-shrink-0">
+                        <div className="flex items-center gap-1 flex-shrink-0">
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => handleDownloadReport(report.file_path, report.file_name)}
                             title="Download"
+                            className="h-8 w-8 p-0"
                           >
                             <Download className="w-4 h-4" />
                           </Button>
@@ -1058,6 +1063,7 @@ export default function VisitDetailPage() {
                               size="sm"
                               onClick={() => handleDeleteReport(report.id, report.file_path)}
                               title="Delete"
+                              className="h-8 w-8 p-0"
                             >
                               <Trash2 className="w-4 h-4 text-red-500" />
                             </Button>
@@ -1068,11 +1074,11 @@ export default function VisitDetailPage() {
                   </div>
                 ) : visit.no_report_reason ? (
                   <div>
-                    <p className="text-amber-600 font-medium">No report available</p>
-                    <p className="text-sm text-gray-500">{visit.no_report_reason}</p>
+                    <p className="text-amber-600 font-medium text-sm">No report available</p>
+                    <p className="text-xs sm:text-sm text-gray-500">{visit.no_report_reason}</p>
                   </div>
                 ) : (
-                  <p className="text-gray-400">No reports uploaded</p>
+                  <p className="text-gray-400 text-sm">No reports uploaded</p>
                 )}
               </div>
             </div>
@@ -1080,30 +1086,30 @@ export default function VisitDetailPage() {
         </Card>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Assigned Team</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between pb-2 sm:pb-4">
+            <CardTitle className="text-base sm:text-lg">Assigned Team</CardTitle>
             {hasRole('admin') && visit.status !== 'completed' && visit.status !== 'cancelled' && (
-              <Button variant="ghost" size="sm" onClick={openReassignModal}>
-                <Users className="w-4 h-4 mr-1" />
-                Reassign
+              <Button variant="ghost" size="sm" onClick={openReassignModal} className="h-8 px-2">
+                <Users className="w-4 h-4 sm:mr-1" />
+                <span className="hidden sm:inline">Reassign</span>
               </Button>
             )}
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 sm:space-y-4">
             <div>
-              <p className="text-sm text-gray-500">Vendor Coordinator</p>
-              <p className="font-medium">{visit.vendor_coordinator?.full_name}</p>
-              <p className="text-sm text-gray-400">{visit.vendor_coordinator?.email}</p>
+              <p className="text-xs sm:text-sm text-gray-500">Vendor Coordinator</p>
+              <p className="font-medium text-sm sm:text-base">{visit.vendor_coordinator?.full_name}</p>
+              <p className="text-xs sm:text-sm text-gray-400 truncate">{visit.vendor_coordinator?.email}</p>
             </div>
             <div>
-              <p className="text-sm text-gray-500">Maintenance Engineer</p>
-              <p className="font-medium">{visit.maintenance_engineer?.full_name}</p>
-              <p className="text-sm text-gray-400">{visit.maintenance_engineer?.email}</p>
+              <p className="text-xs sm:text-sm text-gray-500">Maintenance Engineer</p>
+              <p className="font-medium text-sm sm:text-base">{visit.maintenance_engineer?.full_name}</p>
+              <p className="text-xs sm:text-sm text-gray-400 truncate">{visit.maintenance_engineer?.email}</p>
             </div>
             <div>
-              <p className="text-sm text-gray-500">Technical Engineer</p>
-              <p className="font-medium">{visit.technical_engineer?.full_name}</p>
-              <p className="text-sm text-gray-400">{visit.technical_engineer?.email}</p>
+              <p className="text-xs sm:text-sm text-gray-500">Technical Engineer</p>
+              <p className="font-medium text-sm sm:text-base">{visit.technical_engineer?.full_name}</p>
+              <p className="text-xs sm:text-sm text-gray-400 truncate">{visit.technical_engineer?.email}</p>
             </div>
           </CardContent>
         </Card>
@@ -1111,57 +1117,64 @@ export default function VisitDetailPage() {
 
       {/* Workflow Actions */}
       <Card>
-        <CardHeader>
-          <CardTitle>Workflow Actions</CardTitle>
+        <CardHeader className="pb-2 sm:pb-4">
+          <CardTitle className="text-base sm:text-lg">Workflow Actions</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-2 sm:gap-3">
             {visit.status === 'scheduled' && canConfirmDate && (
-              <Button onClick={handleConfirmDate}>
-                <Calendar className="w-4 h-4 mr-2" />
-                Confirm Visit Date
+              <Button onClick={handleConfirmDate} size="sm" className="text-xs sm:text-sm">
+                <Calendar className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Confirm Visit Date</span>
+                <span className="sm:hidden ml-1">Confirm</span>
               </Button>
             )}
             {canUploadReport && (
               <>
-                <Button onClick={() => setUploadModalOpen(true)}>
-                  <Upload className="w-4 h-4 mr-2" />
-                  Upload Report
+                <Button onClick={() => setUploadModalOpen(true)} size="sm" className="text-xs sm:text-sm">
+                  <Upload className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Upload Report</span>
+                  <span className="sm:hidden ml-1">Upload</span>
                 </Button>
-                <Button variant="secondary" onClick={() => setNoReportModalOpen(true)}>
-                  <FileX className="w-4 h-4 mr-2" />
-                  No Report Available
+                <Button variant="secondary" onClick={() => setNoReportModalOpen(true)} size="sm" className="text-xs sm:text-sm">
+                  <FileX className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">No Report Available</span>
+                  <span className="sm:hidden ml-1">No Report</span>
                 </Button>
               </>
             )}
             {canCreateRecommendation && (
-              <Button onClick={() => setRecommendationModalOpen(true)}>
-                <Plus className="w-4 h-4 mr-2" />
-                Add Recommendation
+              <Button onClick={() => setRecommendationModalOpen(true)} size="sm" className="text-xs sm:text-sm">
+                <Plus className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Add Recommendation</span>
+                <span className="sm:hidden ml-1">Add Rec.</span>
               </Button>
             )}
             {canReschedule && (
-              <Button variant="secondary" onClick={() => setRescheduleModalOpen(true)}>
-                <RefreshCw className="w-4 h-4 mr-2" />
-                Reschedule Visit
+              <Button variant="secondary" onClick={() => setRescheduleModalOpen(true)} size="sm" className="text-xs sm:text-sm">
+                <RefreshCw className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Reschedule Visit</span>
+                <span className="sm:hidden ml-1">Reschedule</span>
               </Button>
             )}
             {canCloseVisit && (
-              <Button onClick={handleCloseVisit} className="bg-green-600 hover:bg-green-700">
-                <CheckCircle className="w-4 h-4 mr-2" />
-                Close Visit
+              <Button onClick={handleCloseVisit} className="bg-green-600 hover:bg-green-700 text-xs sm:text-sm" size="sm">
+                <CheckCircle className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Close Visit</span>
+                <span className="sm:hidden ml-1">Close</span>
               </Button>
             )}
             {visit.status === 'completed' && (
-              <div className="flex items-center space-x-4">
+              <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
                 <div className="flex items-center text-green-600">
-                  <CheckCircle className="w-5 h-5 mr-2" />
-                  <span className="font-medium">Visit Completed</span>
+                  <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2" />
+                  <span className="font-medium text-sm sm:text-base">Completed</span>
                 </div>
                 {canReopenVisit && (
-                  <Button variant="secondary" onClick={handleReopenVisit}>
-                    <RotateCcw className="w-4 h-4 mr-2" />
-                    Reopen Visit
+                  <Button variant="secondary" onClick={handleReopenVisit} size="sm" className="text-xs sm:text-sm">
+                    <RotateCcw className="w-4 h-4 sm:mr-2" />
+                    <span className="hidden sm:inline">Reopen Visit</span>
+                    <span className="sm:hidden ml-1">Reopen</span>
                   </Button>
                 )}
               </div>
@@ -1172,141 +1185,218 @@ export default function VisitDetailPage() {
 
       {/* Recommendations */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Recommendations</CardTitle>
-          <span className="text-sm text-gray-500">{recommendations.length} items</span>
+        <CardHeader className="flex flex-row items-center justify-between pb-2 sm:pb-4">
+          <CardTitle className="text-base sm:text-lg">Recommendations</CardTitle>
+          <span className="text-xs sm:text-sm text-gray-500">{recommendations.length} items</span>
         </CardHeader>
         <CardContent>
           {recommendations.length === 0 ? (
-            <p className="text-gray-500 text-center py-4">No recommendations yet.</p>
+            <p className="text-gray-500 text-center py-4 text-sm">No recommendations yet.</p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Description</TableHead>
-                  <TableHead>SAP Notification</TableHead>
-                  <TableHead>Due Date</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created By</TableHead>
-                  <TableHead align="right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <>
+              {/* Mobile Card View */}
+              <div className="sm:hidden space-y-3">
                 {recommendations.map((rec) => (
-                  <TableRow key={rec.id}>
-                    <TableCell className="max-w-xs">
-                      <p className="truncate">{rec.description}</p>
-                      {rec.review_decision && (
-                        <div className="mt-2 space-y-1">
-                          <div className="flex items-center gap-2">
-                            <Badge variant={rec.review_decision === 'no_action' ? 'completed' : 'in_progress'}>
-                              {rec.review_decision === 'no_action' && 'No Action'}
-                              {rec.review_decision === 'request_sap' && 'SAP Notification Requested'}
-                              {rec.review_decision === 'other_action' && 'Action Required'}
-                            </Badge>
-                            {rec.action_assigned_to && (
-                              <span className="text-xs text-gray-500">
-                                → {rec.action_assigned_to.full_name}
-                              </span>
-                            )}
-                          </div>
-                          {rec.review_action_description && (
-                            <p className="text-xs text-gray-600">{rec.review_action_description}</p>
-                          )}
-                          {rec.technical_review_response && (
-                            <p className="text-xs text-gray-500 italic">&quot;{rec.technical_review_response}&quot;</p>
-                          )}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell>{rec.sap_notification_number || '-'}</TableCell>
-                    <TableCell>
-                      {rec.due_date ? format(new Date(rec.due_date), 'MMM d, yyyy') : '-'}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={getStatusVariant(rec.status)}>
+                  <div key={rec.id} className="bg-gray-50 rounded-lg p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-medium line-clamp-2 flex-1">{rec.description}</p>
+                      <Badge variant={getStatusVariant(rec.status)} className="flex-shrink-0 text-[10px]">
                         {rec.status.replace(/_/g, ' ')}
                       </Badge>
-                    </TableCell>
-                    <TableCell>{rec.created_by?.full_name}</TableCell>
-                    <TableCell align="right">
-                      <div className="flex items-center justify-end space-x-2">
-                        {rec.status === 'open' && !rec.sent_for_review && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleSendForReview(rec.id)}
-                            title="Send for Review"
-                          >
-                            <FileText className="w-4 h-4 text-blue-500" />
-                          </Button>
+                    </div>
+                    {rec.review_decision && (
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant={rec.review_decision === 'no_action' ? 'completed' : 'in_progress'} className="text-[10px]">
+                            {rec.review_decision === 'no_action' && 'No Action'}
+                            {rec.review_decision === 'request_sap' && 'SAP Requested'}
+                            {rec.review_decision === 'other_action' && 'Action Required'}
+                          </Badge>
+                          {rec.action_assigned_to && (
+                            <span className="text-[10px] text-gray-500">→ {rec.action_assigned_to.full_name}</span>
+                          )}
+                        </div>
+                        {rec.review_action_description && (
+                          <p className="text-[10px] text-gray-600">{rec.review_action_description}</p>
                         )}
-                        {rec.sent_for_review && rec.status === 'in_review' && canReview && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedRecommendation(rec);
-                              setReviewModalOpen(true);
-                            }}
-                            title="Submit Review"
-                          >
-                            <FileText className="w-4 h-4 text-purple-500" />
-                          </Button>
-                        )}
-                        {/* Show Add SAP Details button when SAP is requested but not yet provided */}
-                        {rec.status === 'approved' && rec.review_decision === 'request_sap' && !rec.sap_notification_number && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openSapDetailsModal(rec)}
-                            title="Add SAP Details (Required)"
-                            className="text-amber-600"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </Button>
-                        )}
-                        {(rec.status === 'open' || rec.status === 'approved') && (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleCompleteRecommendation(rec.id)}
-                              title={rec.review_decision === 'request_sap' && !rec.sap_notification_number ? 'Add SAP details first' : 'Mark Complete'}
-                              disabled={rec.review_decision === 'request_sap' && !rec.sap_notification_number}
-                            >
-                              <CheckCircle className={`w-4 h-4 ${rec.review_decision === 'request_sap' && !rec.sap_notification_number ? 'text-gray-300' : 'text-green-500'}`} />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleCancelRecommendation(rec.id)}
-                              title="Cancel"
-                            >
-                              <XCircle className="w-4 h-4 text-red-500" />
-                            </Button>
-                          </>
+                        {rec.technical_review_response && (
+                          <p className="text-[10px] text-gray-500 italic line-clamp-2">&quot;{rec.technical_review_response}&quot;</p>
                         )}
                       </div>
-                    </TableCell>
-                  </TableRow>
+                    )}
+                    <div className="flex items-center justify-between text-[10px] text-gray-500 pt-1 border-t border-gray-200">
+                      <div className="flex gap-3">
+                        {rec.sap_notification_number && <span>SAP: {rec.sap_notification_number}</span>}
+                        {rec.due_date && <span>Due: {format(new Date(rec.due_date), 'MMM d')}</span>}
+                      </div>
+                      <span>By {rec.created_by?.full_name}</span>
+                    </div>
+                    <div className="flex items-center justify-end gap-1 pt-1">
+                      {rec.status === 'open' && !rec.sent_for_review && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
+                        <Button variant="ghost" size="sm" onClick={() => handleSendForReview(rec.id)} className="h-7 px-2 text-[10px]">
+                          <FileText className="w-3 h-3 text-blue-500 mr-1" />Review
+                        </Button>
+                      )}
+                      {rec.sent_for_review && rec.status === 'in_review' && canReview && (
+                        <Button variant="ghost" size="sm" onClick={() => { setSelectedRecommendation(rec); setReviewModalOpen(true); }} className="h-7 px-2 text-[10px]">
+                          <FileText className="w-3 h-3 text-purple-500 mr-1" />Review
+                        </Button>
+                      )}
+                      {rec.status === 'approved' && rec.review_decision === 'request_sap' && !rec.sap_notification_number && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
+                        <Button variant="ghost" size="sm" onClick={() => openSapDetailsModal(rec)} className="h-7 px-2 text-[10px] text-amber-600">
+                          <Edit3 className="w-3 h-3 mr-1" />SAP
+                        </Button>
+                      )}
+                      {(rec.status === 'open' || rec.status === 'approved') && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleCompleteRecommendation(rec.id)}
+                            disabled={rec.review_decision === 'request_sap' && !rec.sap_notification_number}
+                            className="h-7 w-7 p-0"
+                          >
+                            <CheckCircle className={`w-4 h-4 ${rec.review_decision === 'request_sap' && !rec.sap_notification_number ? 'text-gray-300' : 'text-green-500'}`} />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleCancelRecommendation(rec.id)} className="h-7 w-7 p-0">
+                            <XCircle className="w-4 h-4 text-red-500" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+              {/* Desktop Table View */}
+              <div className="hidden sm:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Description</TableHead>
+                      <TableHead>SAP Notification</TableHead>
+                      <TableHead>Due Date</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Created By</TableHead>
+                      <TableHead align="right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {recommendations.map((rec) => (
+                      <TableRow key={rec.id}>
+                        <TableCell className="max-w-xs">
+                          <p className="truncate">{rec.description}</p>
+                          {rec.review_decision && (
+                            <div className="mt-2 space-y-1">
+                              <div className="flex items-center gap-2">
+                                <Badge variant={rec.review_decision === 'no_action' ? 'completed' : 'in_progress'}>
+                                  {rec.review_decision === 'no_action' && 'No Action'}
+                                  {rec.review_decision === 'request_sap' && 'SAP Notification Requested'}
+                                  {rec.review_decision === 'other_action' && 'Action Required'}
+                                </Badge>
+                                {rec.action_assigned_to && (
+                                  <span className="text-xs text-gray-500">
+                                    → {rec.action_assigned_to.full_name}
+                                  </span>
+                                )}
+                              </div>
+                              {rec.review_action_description && (
+                                <p className="text-xs text-gray-600">{rec.review_action_description}</p>
+                              )}
+                              {rec.technical_review_response && (
+                                <p className="text-xs text-gray-500 italic">&quot;{rec.technical_review_response}&quot;</p>
+                              )}
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell>{rec.sap_notification_number || '-'}</TableCell>
+                        <TableCell>
+                          {rec.due_date ? format(new Date(rec.due_date), 'MMM d, yyyy') : '-'}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={getStatusVariant(rec.status)}>
+                            {rec.status.replace(/_/g, ' ')}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{rec.created_by?.full_name}</TableCell>
+                        <TableCell align="right">
+                          <div className="flex items-center justify-end space-x-2">
+                            {rec.status === 'open' && !rec.sent_for_review && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleSendForReview(rec.id)}
+                                title="Send for Review"
+                              >
+                                <FileText className="w-4 h-4 text-blue-500" />
+                              </Button>
+                            )}
+                            {rec.sent_for_review && rec.status === 'in_review' && canReview && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setSelectedRecommendation(rec);
+                                  setReviewModalOpen(true);
+                                }}
+                                title="Submit Review"
+                              >
+                                <FileText className="w-4 h-4 text-purple-500" />
+                              </Button>
+                            )}
+                            {rec.status === 'approved' && rec.review_decision === 'request_sap' && !rec.sap_notification_number && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openSapDetailsModal(rec)}
+                                title="Add SAP Details (Required)"
+                                className="text-amber-600"
+                              >
+                                <Edit3 className="w-4 h-4" />
+                              </Button>
+                            )}
+                            {(rec.status === 'open' || rec.status === 'approved') && (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleCompleteRecommendation(rec.id)}
+                                  title={rec.review_decision === 'request_sap' && !rec.sap_notification_number ? 'Add SAP details first' : 'Mark Complete'}
+                                  disabled={rec.review_decision === 'request_sap' && !rec.sap_notification_number}
+                                >
+                                  <CheckCircle className={`w-4 h-4 ${rec.review_decision === 'request_sap' && !rec.sap_notification_number ? 'text-gray-300' : 'text-green-500'}`} />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleCancelRecommendation(rec.id)}
+                                  title="Cancel"
+                                >
+                                  <XCircle className="w-4 h-4 text-red-500" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
 
       {/* Activity Log */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center">
-            <Clock className="w-5 h-5 mr-2" />
+        <CardHeader className="pb-2 sm:pb-4">
+          <CardTitle className="flex items-center text-base sm:text-lg">
+            <Clock className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
             Activity Log
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             {/* Build activity log from visit data */}
             {(() => {
               const activities: { date: string; event: string; details?: string }[] = [];
@@ -1318,7 +1408,7 @@ export default function VisitDetailPage() {
                 activities.push({
                   date: visit.created_at,
                   event: 'Visit created',
-                  details: `Scheduled for ${format(new Date(originalScheduledDate), 'MMMM d, yyyy')}`,
+                  details: `Scheduled for ${format(new Date(originalScheduledDate), 'MMM d, yyyy')}`,
                 });
               }
 
@@ -1327,15 +1417,15 @@ export default function VisitDetailPage() {
                 activities.push({
                   date: visit.confirmed_at || visit.updated_at,
                   event: 'Visit date confirmed',
-                  details: `Confirmed for ${format(new Date(visit.confirmed_date), 'MMMM d, yyyy')}`,
+                  details: `Confirmed for ${format(new Date(visit.confirmed_date), 'MMM d, yyyy')}`,
                 });
               }
 
               // Rescheduled
               if (visit.rescheduled_at) {
-                let details = `From ${visit.rescheduled_from ? format(new Date(visit.rescheduled_from), 'MMM d, yyyy') : 'previous date'} to ${format(new Date(visit.scheduled_date), 'MMM d, yyyy')}`;
+                let details = `From ${visit.rescheduled_from ? format(new Date(visit.rescheduled_from), 'MMM d') : 'previous date'} to ${format(new Date(visit.scheduled_date), 'MMM d, yyyy')}`;
                 if (visit.reschedule_reason) {
-                  details += `. Reason: ${visit.reschedule_reason}`;
+                  details += `. ${visit.reschedule_reason}`;
                 }
                 activities.push({
                   date: visit.rescheduled_at,
@@ -1346,12 +1436,12 @@ export default function VisitDetailPage() {
 
               // Reports uploaded
               visitReports.forEach(report => {
-                let details = `File: ${report.file_name}`;
+                let details = report.file_name;
                 if (report.uploaded_by?.full_name) {
-                  details += ` (by ${report.uploaded_by.full_name})`;
+                  details += ` (${report.uploaded_by.full_name})`;
                 }
                 if (report.notes) {
-                  details += `. Notes: ${report.notes}`;
+                  details += `. ${report.notes}`;
                 }
                 activities.push({
                   date: report.uploaded_at,
@@ -1364,7 +1454,7 @@ export default function VisitDetailPage() {
               if (visit.no_report_reason && visitReports.length === 0) {
                 activities.push({
                   date: visit.updated_at,
-                  event: 'Marked as no report available',
+                  event: 'No report available',
                   details: visit.no_report_reason,
                 });
               }
@@ -1374,7 +1464,7 @@ export default function VisitDetailPage() {
                 activities.push({
                   date: rec.created_at,
                   event: 'Recommendation created',
-                  details: rec.description.substring(0, 100) + (rec.description.length > 100 ? '...' : ''),
+                  details: rec.description.substring(0, 80) + (rec.description.length > 80 ? '...' : ''),
                 });
 
                 if (rec.reviewed_at) {
@@ -1389,7 +1479,7 @@ export default function VisitDetailPage() {
                   activities.push({
                     date: rec.completed_at,
                     event: 'Recommendation completed',
-                    details: rec.description.substring(0, 50) + (rec.description.length > 50 ? '...' : ''),
+                    details: rec.description.substring(0, 40) + (rec.description.length > 40 ? '...' : ''),
                   });
                 }
 
@@ -1405,10 +1495,10 @@ export default function VisitDetailPage() {
               // Tasks completed
               tasks.filter(t => t.completed_at).forEach(task => {
                 const taskLabels: Record<string, string> = {
-                  confirm_visit_date: 'Confirm visit date task',
-                  upload_report: 'Upload report task',
-                  create_recommendations: 'Create recommendations task',
-                  review_recommendations: 'Review recommendations task',
+                  confirm_visit_date: 'Date confirmation task',
+                  upload_report: 'Report upload task',
+                  create_recommendations: 'Recommendations task',
+                  review_recommendations: 'Review task',
                   technical_review: 'Technical review task',
                   close_visit: 'Close visit task',
                 };
@@ -1422,25 +1512,25 @@ export default function VisitDetailPage() {
               activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
               if (activities.length === 0) {
-                return <p className="text-gray-500 text-center py-4">No activity recorded yet.</p>;
+                return <p className="text-gray-500 text-center py-4 text-sm">No activity recorded yet.</p>;
               }
 
               return (
                 <div className="relative">
-                  <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
-                  <div className="space-y-4">
+                  <div className="absolute left-3 sm:left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
+                  <div className="space-y-3 sm:space-y-4">
                     {activities.map((activity, idx) => (
-                      <div key={idx} className="relative pl-10">
-                        <div className="absolute left-2.5 w-3 h-3 bg-primary-500 rounded-full border-2 border-white" />
-                        <div className="bg-gray-50 rounded-lg p-3">
-                          <div className="flex items-center justify-between">
-                            <p className="font-medium text-gray-900">{activity.event}</p>
-                            <p className="text-sm text-gray-500">
-                              {format(new Date(activity.date), 'MMM d, yyyy h:mm a')}
+                      <div key={idx} className="relative pl-8 sm:pl-10">
+                        <div className="absolute left-1.5 sm:left-2.5 w-3 h-3 bg-primary-500 rounded-full border-2 border-white" />
+                        <div className="bg-gray-50 rounded-lg p-2 sm:p-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2">
+                            <p className="font-medium text-gray-900 text-sm">{activity.event}</p>
+                            <p className="text-[10px] sm:text-sm text-gray-500">
+                              {format(new Date(activity.date), 'MMM d, h:mm a')}
                             </p>
                           </div>
                           {activity.details && (
-                            <p className="text-sm text-gray-600 mt-1">{activity.details}</p>
+                            <p className="text-xs sm:text-sm text-gray-600 mt-1 line-clamp-2">{activity.details}</p>
                           )}
                         </div>
                       </div>
@@ -1487,11 +1577,11 @@ export default function VisitDetailPage() {
             rows={2}
           />
 
-          <div className="flex justify-end space-x-3 pt-4 border-t">
-            <Button type="button" variant="secondary" onClick={() => setUploadModalOpen(false)}>
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 pt-4 border-t">
+            <Button type="button" variant="secondary" onClick={() => setUploadModalOpen(false)} className="w-full sm:w-auto">
               Cancel
             </Button>
-            <Button type="submit" loading={submitting} disabled={!file}>
+            <Button type="submit" loading={submitting} disabled={!file} className="w-full sm:w-auto">
               Upload Report
             </Button>
           </div>
@@ -1526,7 +1616,7 @@ export default function VisitDetailPage() {
           />
 
           {!visit?.routine?.requires_technical_review && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <Input
                 label="SAP Notification Number"
                 name="sap_notification_number"
@@ -1545,12 +1635,12 @@ export default function VisitDetailPage() {
             </div>
           )}
 
-          <div className="flex justify-end space-x-3 pt-4 border-t">
-            <Button type="button" variant="secondary" onClick={() => setRecommendationModalOpen(false)}>
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 pt-4 border-t">
+            <Button type="button" variant="secondary" onClick={() => setRecommendationModalOpen(false)} className="w-full sm:w-auto">
               Cancel
             </Button>
-            <Button type="submit" loading={submitting}>
-              {visit?.routine?.requires_technical_review ? 'Send for Technical Review' : 'Create Recommendation'}
+            <Button type="submit" loading={submitting} className="w-full sm:w-auto">
+              {visit?.routine?.requires_technical_review ? 'Send for Review' : 'Create'}
             </Button>
           </div>
         </form>
@@ -1621,11 +1711,11 @@ export default function VisitDetailPage() {
             rows={3}
           />
 
-          <div className="flex justify-end space-x-3 pt-4 border-t">
-            <Button type="button" variant="secondary" onClick={() => setReviewModalOpen(false)}>
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 pt-4 border-t">
+            <Button type="button" variant="secondary" onClick={() => setReviewModalOpen(false)} className="w-full sm:w-auto">
               Cancel
             </Button>
-            <Button type="submit" loading={submitting} disabled={!reviewDecision}>
+            <Button type="submit" loading={submitting} disabled={!reviewDecision} className="w-full sm:w-auto">
               Submit Review
             </Button>
           </div>
@@ -1668,12 +1758,12 @@ export default function VisitDetailPage() {
             rows={3}
           />
 
-          <div className="flex justify-end space-x-3 pt-4 border-t">
-            <Button type="button" variant="secondary" onClick={() => setRescheduleModalOpen(false)}>
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 pt-4 border-t">
+            <Button type="button" variant="secondary" onClick={() => setRescheduleModalOpen(false)} className="w-full sm:w-auto">
               Cancel
             </Button>
-            <Button type="submit" loading={submitting}>
-              Reschedule Visit
+            <Button type="submit" loading={submitting} className="w-full sm:w-auto">
+              Reschedule
             </Button>
           </div>
         </form>
@@ -1703,11 +1793,11 @@ export default function VisitDetailPage() {
             rows={3}
           />
 
-          <div className="flex justify-end space-x-3 pt-4 border-t">
-            <Button type="button" variant="secondary" onClick={() => setNoReportModalOpen(false)}>
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 pt-4 border-t">
+            <Button type="button" variant="secondary" onClick={() => setNoReportModalOpen(false)} className="w-full sm:w-auto">
               Cancel
             </Button>
-            <Button type="submit" loading={submitting} disabled={!noReportReason.trim()}>
+            <Button type="submit" loading={submitting} disabled={!noReportReason.trim()} className="w-full sm:w-auto">
               Confirm
             </Button>
           </div>
@@ -1761,11 +1851,11 @@ export default function VisitDetailPage() {
               .map(user => ({ value: user.id, label: user.full_name }))}
           />
 
-          <div className="flex justify-end space-x-3 pt-4 border-t">
-            <Button type="button" variant="secondary" onClick={() => setReassignModalOpen(false)}>
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 pt-4 border-t">
+            <Button type="button" variant="secondary" onClick={() => setReassignModalOpen(false)} className="w-full sm:w-auto">
               Cancel
             </Button>
-            <Button type="submit" loading={submitting}>
+            <Button type="submit" loading={submitting} className="w-full sm:w-auto">
               Save Changes
             </Button>
           </div>
@@ -1809,11 +1899,11 @@ export default function VisitDetailPage() {
             required
           />
 
-          <div className="flex justify-end space-x-3 pt-4 border-t">
-            <Button type="button" variant="secondary" onClick={() => setSapDetailsModalOpen(false)}>
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 pt-4 border-t">
+            <Button type="button" variant="secondary" onClick={() => setSapDetailsModalOpen(false)} className="w-full sm:w-auto">
               Cancel
             </Button>
-            <Button type="submit" loading={submitting}>
+            <Button type="submit" loading={submitting} className="w-full sm:w-auto">
               Save SAP Details
             </Button>
           </div>
