@@ -244,13 +244,11 @@ export default function VisitDetailPage() {
         if (updateError) throw updateError;
       }
 
-      setSuccess('Report uploaded successfully');
       await fetchVisitData();
-      setTimeout(() => {
-        setUploadModalOpen(false);
-        setFile(null);
-        setReportNotes('');
-      }, 1000);
+      setUploadModalOpen(false);
+      setFile(null);
+      setReportNotes('');
+      setSuccess('Report uploaded successfully');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       setError(message);
@@ -378,15 +376,13 @@ export default function VisitDetailPage() {
         });
       }
 
+      await fetchVisitData();
+      setRecommendationModalOpen(false);
+      setNewRecommendation({ description: '', sap_notification_number: '', due_date: '' });
       setSuccess(requiresReview
         ? 'Recommendation created and sent for technical review'
         : 'Recommendation created successfully'
       );
-      await fetchVisitData();
-      setTimeout(() => {
-        setRecommendationModalOpen(false);
-        setNewRecommendation({ description: '', sap_notification_number: '', due_date: '' });
-      }, 1000);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       setError(message);
@@ -484,16 +480,14 @@ export default function VisitDetailPage() {
         .eq('assigned_to_id', userProfile.id)
         .eq('status', 'pending');
 
-      setSuccess('Review submitted successfully');
       await fetchVisitData();
-      setTimeout(() => {
-        setReviewModalOpen(false);
-        setSelectedRecommendation(null);
-        setReviewResponse('');
-        setReviewDecision('');
-        setReviewActionDescription('');
-        setReviewAssignToId('');
-      }, 1000);
+      setReviewModalOpen(false);
+      setSelectedRecommendation(null);
+      setReviewResponse('');
+      setReviewDecision('');
+      setReviewActionDescription('');
+      setReviewAssignToId('');
+      setSuccess('Review submitted successfully');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       setError(message);
@@ -555,13 +549,11 @@ export default function VisitDetailPage() {
 
       if (updateError) throw updateError;
 
-      setSuccess('SAP details saved successfully');
       await fetchVisitData();
-      setTimeout(() => {
-        setSapDetailsModalOpen(false);
-        setSelectedRecForSap(null);
-        setSapDetails({ sap_notification_number: '', due_date: '' });
-      }, 1000);
+      setSapDetailsModalOpen(false);
+      setSelectedRecForSap(null);
+      setSapDetails({ sap_notification_number: '', due_date: '' });
+      setSuccess('SAP details saved successfully');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       setError(message);
@@ -707,12 +699,10 @@ export default function VisitDetailPage() {
         });
       }
 
-      setSuccess('Visit rescheduled successfully');
       await fetchVisitData();
-      setTimeout(() => {
-        setRescheduleModalOpen(false);
-        setRescheduleData({ new_date: '', reason: '' });
-      }, 1000);
+      setRescheduleModalOpen(false);
+      setRescheduleData({ new_date: '', reason: '' });
+      setSuccess('Visit rescheduled successfully');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       setError(message);
@@ -740,12 +730,10 @@ export default function VisitDetailPage() {
 
       if (updateError) throw updateError;
 
-      setSuccess('Marked as no report available');
       await fetchVisitData();
-      setTimeout(() => {
-        setNoReportModalOpen(false);
-        setNoReportReason('');
-      }, 1000);
+      setNoReportModalOpen(false);
+      setNoReportReason('');
+      setSuccess('Marked as no report available');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       setError(message);
@@ -785,11 +773,9 @@ export default function VisitDetailPage() {
 
       if (updateError) throw updateError;
 
-      setSuccess('Team members reassigned successfully');
       await fetchVisitData();
-      setTimeout(() => {
-        setReassignModalOpen(false);
-      }, 1000);
+      setReassignModalOpen(false);
+      setSuccess('Team members reassigned successfully');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       setError(message);
