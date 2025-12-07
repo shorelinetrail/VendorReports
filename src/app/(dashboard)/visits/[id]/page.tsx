@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check, RefreshCw, RotateCcw, Clock, FileX, Trash2, Users } from 'lucide-react';
+import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check, RefreshCw, RotateCcw, Clock, FileX, Trash2, Users, Edit3 } from 'lucide-react';
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -80,6 +80,9 @@ export default function VisitDetailPage() {
     maintenance_engineer_id: '',
     technical_engineer_id: '',
   });
+  const [sapDetailsModalOpen, setSapDetailsModalOpen] = useState(false);
+  const [selectedRecForSap, setSelectedRecForSap] = useState<RecommendationWithCreator | null>(null);
+  const [sapDetails, setSapDetails] = useState({ sap_notification_number: '', due_date: '' });
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -497,6 +500,13 @@ export default function VisitDetailPage() {
   };
 
   const handleCompleteRecommendation = async (recommendationId: string) => {
+    // Find the recommendation to check if SAP details are required
+    const rec = recommendations.find(r => r.id === recommendationId);
+    if (rec?.review_decision === 'request_sap' && !rec.sap_notification_number) {
+      alert('SAP notification number and due date are required before completing this recommendation.');
+      return;
+    }
+
     try {
       const { error } = await supabase
         .from('recommendations')
@@ -511,6 +521,49 @@ export default function VisitDetailPage() {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       alert(message);
+    }
+  };
+
+  const openSapDetailsModal = (rec: RecommendationWithCreator) => {
+    setSelectedRecForSap(rec);
+    setSapDetails({
+      sap_notification_number: rec.sap_notification_number || '',
+      due_date: rec.due_date || '',
+    });
+    setSapDetailsModalOpen(true);
+  };
+
+  const handleSaveSapDetails = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedRecForSap) return;
+
+    setError(null);
+    setSuccess(null);
+    setSubmitting(true);
+
+    try {
+      const { error: updateError } = await supabase
+        .from('recommendations')
+        .update({
+          sap_notification_number: sapDetails.sap_notification_number,
+          due_date: sapDetails.due_date,
+        })
+        .eq('id', selectedRecForSap.id);
+
+      if (updateError) throw updateError;
+
+      setSuccess('SAP details saved successfully');
+      await fetchVisitData();
+      setTimeout(() => {
+        setSapDetailsModalOpen(false);
+        setSelectedRecForSap(null);
+        setSapDetails({ sap_notification_number: '', due_date: '' });
+      }, 1000);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      setError(message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -767,21 +820,21 @@ export default function VisitDetailPage() {
 
   const currentStep = visit ? getWorkflowStep(visit.status) : 1;
 
-  // Get who the workflow is waiting for at the current step
-  const getWaitingFor = (): { name: string; role: string } | null => {
+  // Get who the workflow is waiting for at the current step and what action is needed
+  const getWaitingFor = (): { name: string; role: string; action: string } | null => {
     if (!visit || visit.status === 'completed' || visit.status === 'cancelled') return null;
 
     switch (visit.status) {
       case 'scheduled':
-        return { name: visit.vendor_coordinator?.full_name || 'Vendor Coordinator', role: 'Vendor Coordinator' };
+        return { name: visit.vendor_coordinator?.full_name || 'Vendor Coordinator', role: 'Vendor Coordinator', action: 'to confirm visit date' };
       case 'date_confirmed':
-        return { name: visit.vendor_coordinator?.full_name || 'Vendor Coordinator', role: 'Vendor Coordinator' };
+        return { name: visit.vendor_coordinator?.full_name || 'Vendor Coordinator', role: 'Vendor Coordinator', action: 'to upload maintenance report' };
       case 'report_uploaded':
-        return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer' };
+        return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to create recommendations' };
       case 'recommendations_created':
-        return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer' };
+        return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to complete or close visit' };
       case 'in_review':
-        return { name: visit.technical_engineer?.full_name || 'Technical Engineer', role: 'Technical Engineer' };
+        return { name: visit.technical_engineer?.full_name || 'Technical Engineer', role: 'Technical Engineer', action: 'to review recommendations' };
       default:
         return null;
     }
@@ -925,11 +978,11 @@ export default function VisitDetailPage() {
             </div>
             {waitingFor && (
               <div className="mt-4 pt-4 border-t border-gray-200">
-                <div className="flex items-center justify-center text-sm">
-                  <Clock className="w-4 h-4 text-amber-500 mr-2" />
-                  <span className="text-gray-600">Waiting for </span>
-                  <span className="font-medium text-gray-900 ml-1">{waitingFor.name}</span>
-                  <span className="text-gray-500 ml-1">({waitingFor.role})</span>
+                <div className="flex items-center justify-center text-sm flex-wrap gap-1">
+                  <Clock className="w-4 h-4 text-amber-500 mr-1" />
+                  <span className="text-gray-600">Waiting for</span>
+                  <span className="font-medium text-gray-900">{waitingFor.name}</span>
+                  <span className="text-gray-600">{waitingFor.action}</span>
                 </div>
               </div>
             )}
@@ -1147,7 +1200,7 @@ export default function VisitDetailPage() {
                           <div className="flex items-center gap-2">
                             <Badge variant={rec.review_decision === 'no_action' ? 'completed' : 'in_progress'}>
                               {rec.review_decision === 'no_action' && 'No Action'}
-                              {rec.review_decision === 'request_sap' && 'SAP Requested'}
+                              {rec.review_decision === 'request_sap' && 'SAP Notification Requested'}
                               {rec.review_decision === 'other_action' && 'Action Required'}
                             </Badge>
                             {rec.action_assigned_to && (
@@ -1200,15 +1253,28 @@ export default function VisitDetailPage() {
                             <FileText className="w-4 h-4 text-purple-500" />
                           </Button>
                         )}
+                        {/* Show Add SAP Details button when SAP is requested but not yet provided */}
+                        {rec.status === 'approved' && rec.review_decision === 'request_sap' && !rec.sap_notification_number && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openSapDetailsModal(rec)}
+                            title="Add SAP Details (Required)"
+                            className="text-amber-600"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </Button>
+                        )}
                         {(rec.status === 'open' || rec.status === 'approved') && (
                           <>
                             <Button
                               variant="ghost"
                               size="sm"
                               onClick={() => handleCompleteRecommendation(rec.id)}
-                              title="Mark Complete"
+                              title={rec.review_decision === 'request_sap' && !rec.sap_notification_number ? 'Add SAP details first' : 'Mark Complete'}
+                              disabled={rec.review_decision === 'request_sap' && !rec.sap_notification_number}
                             >
-                              <CheckCircle className="w-4 h-4 text-green-500" />
+                              <CheckCircle className={`w-4 h-4 ${rec.review_decision === 'request_sap' && !rec.sap_notification_number ? 'text-gray-300' : 'text-green-500'}`} />
                             </Button>
                             <Button
                               variant="ghost"
@@ -1442,6 +1508,12 @@ export default function VisitDetailPage() {
           {error && <Alert variant="error">{error}</Alert>}
           {success && <Alert variant="success">{success}</Alert>}
 
+          {visit?.routine?.requires_technical_review && (
+            <div className="bg-blue-50 p-3 rounded-lg text-sm text-blue-800">
+              This recommendation will be sent to the Technical Engineer for review before SAP notification details can be added.
+            </div>
+          )}
+
           <Textarea
             label="Description"
             name="description"
@@ -1452,30 +1524,32 @@ export default function VisitDetailPage() {
             rows={4}
           />
 
-          <div className="grid grid-cols-2 gap-4">
-            <Input
-              label="SAP Notification Number"
-              name="sap_notification_number"
-              value={newRecommendation.sap_notification_number}
-              onChange={(e) => setNewRecommendation({ ...newRecommendation, sap_notification_number: e.target.value })}
-              placeholder="Optional"
-            />
+          {!visit?.routine?.requires_technical_review && (
+            <div className="grid grid-cols-2 gap-4">
+              <Input
+                label="SAP Notification Number"
+                name="sap_notification_number"
+                value={newRecommendation.sap_notification_number}
+                onChange={(e) => setNewRecommendation({ ...newRecommendation, sap_notification_number: e.target.value })}
+                placeholder="Optional"
+              />
 
-            <Input
-              label="Due Date"
-              name="due_date"
-              type="date"
-              value={newRecommendation.due_date}
-              onChange={(e) => setNewRecommendation({ ...newRecommendation, due_date: e.target.value })}
-            />
-          </div>
+              <Input
+                label="Due Date"
+                name="due_date"
+                type="date"
+                value={newRecommendation.due_date}
+                onChange={(e) => setNewRecommendation({ ...newRecommendation, due_date: e.target.value })}
+              />
+            </div>
+          )}
 
           <div className="flex justify-end space-x-3 pt-4 border-t">
             <Button type="button" variant="secondary" onClick={() => setRecommendationModalOpen(false)}>
               Cancel
             </Button>
             <Button type="submit" loading={submitting}>
-              Create Recommendation
+              {visit?.routine?.requires_technical_review ? 'Send for Technical Review' : 'Create Recommendation'}
             </Button>
           </div>
         </form>
@@ -1692,6 +1766,54 @@ export default function VisitDetailPage() {
             </Button>
             <Button type="submit" loading={submitting}>
               Save Changes
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* SAP Details Modal */}
+      <Modal
+        isOpen={sapDetailsModalOpen}
+        onClose={() => setSapDetailsModalOpen(false)}
+        title="Add SAP Notification Details"
+      >
+        <form onSubmit={handleSaveSapDetails} className="space-y-4">
+          {error && <Alert variant="error">{error}</Alert>}
+          {success && <Alert variant="success">{success}</Alert>}
+
+          <div className="bg-amber-50 p-3 rounded-lg text-sm text-amber-800">
+            The Technical Engineer has requested an SAP notification for this recommendation. Please provide the SAP notification number and due date.
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <p className="text-sm text-gray-500">Recommendation</p>
+            <p className="font-medium">{selectedRecForSap?.description}</p>
+          </div>
+
+          <Input
+            label="SAP Notification Number"
+            name="sap_notification_number"
+            value={sapDetails.sap_notification_number}
+            onChange={(e) => setSapDetails({ ...sapDetails, sap_notification_number: e.target.value })}
+            required
+            placeholder="Enter SAP notification number"
+          />
+
+          <Input
+            label="Due Date"
+            name="due_date"
+            type="date"
+            value={sapDetails.due_date}
+            onChange={(e) => setSapDetails({ ...sapDetails, due_date: e.target.value })}
+            required
+          />
+
+          <div className="flex justify-end space-x-3 pt-4 border-t">
+            <Button type="button" variant="secondary" onClick={() => setSapDetailsModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" loading={submitting}>
+              Save SAP Details
             </Button>
           </div>
         </form>
