@@ -872,6 +872,19 @@ export default function VisitDetailPage() {
 
   // Memoized permission checks
   const { canConfirmDate, canUploadReport, canCreateRecommendation, canReview, canReschedule, canCloseVisit, canReopenVisit, hasReports } = useMemo(() => {
+    if (!visit) {
+      return {
+        canConfirmDate: false,
+        canUploadReport: false,
+        hasReports: false,
+        canCreateRecommendation: false,
+        canReview: false,
+        canReschedule: false,
+        canCloseVisit: false,
+        canReopenVisit: false,
+      };
+    }
+
     const isAdmin = hasRole('admin');
     const isVendorCoord = userProfile?.id === visit.vendor_coordinator_id;
     const isMaintEng = userProfile?.id === visit.maintenance_engineer_id;
@@ -891,10 +904,12 @@ export default function VisitDetailPage() {
       canCloseVisit: (isMaintEng || isAdmin) && isNotClosed && allRecsDone,
       canReopenVisit: isAdmin && visit.status === 'completed',
     };
-  }, [visit.vendor_coordinator_id, visit.maintenance_engineer_id, visit.technical_engineer_id, visit.status, visit.report_file_path, visit.no_report_reason, visitReports.length, recommendations, userProfile?.id, hasRole]);
+  }, [visit, visitReports.length, recommendations, userProfile?.id, hasRole]);
 
   // Memoized activity log
   const activities = useMemo(() => {
+    if (!visit) return [];
+
     const items: { date: string; event: string; details?: string }[] = [];
 
     // Visit created
