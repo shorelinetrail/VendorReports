@@ -664,44 +664,51 @@ export default function VisitDetailPage() {
         <Card>
           <CardContent className="py-6">
             <div className="flex items-center justify-between">
-              {workflowSteps.map((step, index) => (
-                <div key={step.step} className="flex items-center flex-1">
-                  <div className="flex flex-col items-center">
-                    <div
-                      className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium border-2 transition-colors ${
-                        currentStep > step.step
-                          ? 'bg-green-500 border-green-500 text-white'
-                          : currentStep === step.step
-                          ? 'bg-blue-500 border-blue-500 text-white'
-                          : 'bg-white border-gray-300 text-gray-400'
-                      }`}
-                    >
-                      {currentStep > step.step ? (
-                        <Check className="w-5 h-5" />
-                      ) : (
-                        step.step
-                      )}
-                    </div>
-                    <div className="mt-2 text-center">
-                      <p
-                        className={`text-xs font-medium ${
-                          currentStep >= step.step ? 'text-gray-900' : 'text-gray-400'
+              {workflowSteps.map((step, index) => {
+                // When visit is completed, all steps should show as done (green with checkmark)
+                const isCompleted = visit.status === 'completed';
+                const isStepDone = isCompleted ? true : currentStep > step.step;
+                const isCurrentStep = !isCompleted && currentStep === step.step;
+
+                return (
+                  <div key={step.step} className="flex items-center flex-1">
+                    <div className="flex flex-col items-center">
+                      <div
+                        className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium border-2 transition-colors ${
+                          isStepDone
+                            ? 'bg-green-500 border-green-500 text-white'
+                            : isCurrentStep
+                            ? 'bg-blue-500 border-blue-500 text-white'
+                            : 'bg-white border-gray-300 text-gray-400'
                         }`}
                       >
-                        {step.label}
-                      </p>
-                      <p className="text-xs text-gray-500 hidden sm:block">{step.description}</p>
+                        {isStepDone ? (
+                          <Check className="w-5 h-5" />
+                        ) : (
+                          step.step
+                        )}
+                      </div>
+                      <div className="mt-2 text-center">
+                        <p
+                          className={`text-xs font-medium ${
+                            isStepDone || isCurrentStep ? 'text-gray-900' : 'text-gray-400'
+                          }`}
+                        >
+                          {step.label}
+                        </p>
+                        <p className="text-xs text-gray-500 hidden sm:block">{step.description}</p>
+                      </div>
                     </div>
+                    {index < workflowSteps.length - 1 && (
+                      <div
+                        className={`flex-1 h-1 mx-2 ${
+                          isCompleted || currentStep > step.step ? 'bg-green-500' : 'bg-gray-200'
+                        }`}
+                      />
+                    )}
                   </div>
-                  {index < workflowSteps.length - 1 && (
-                    <div
-                      className={`flex-1 h-1 mx-2 ${
-                        currentStep > step.step ? 'bg-green-500' : 'bg-gray-200'
-                      }`}
-                    />
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>
