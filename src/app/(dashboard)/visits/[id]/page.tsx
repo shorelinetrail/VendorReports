@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check, RefreshCw, RotateCcw, Clock, FileX } from 'lucide-react';
+import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check, RefreshCw, RotateCcw, Clock, FileX, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { MaintenanceVisit, Recommendation, Task, VisitStatus, RecommendationStatus } from '@/types/database';
+import { MaintenanceVisit, Recommendation, Task, VisitStatus, RecommendationStatus, VisitReport } from '@/types/database';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
 import Input from '@/components/ui/Input';
@@ -39,12 +39,17 @@ interface RecommendationWithCreator extends Omit<Recommendation, 'created_by' | 
   reviewed_by?: { full_name: string } | null;
 }
 
+interface VisitReportWithUploader extends Omit<VisitReport, 'uploaded_by' | 'visit'> {
+  uploaded_by: { full_name: string };
+}
+
 export default function VisitDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { userProfile, hasRole } = useAuth();
   const [visit, setVisit] = useState<VisitDetails | null>(null);
   const [recommendations, setRecommendations] = useState<RecommendationWithCreator[]>([]);
+  const [visitReports, setVisitReports] = useState<VisitReportWithUploader[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
@@ -52,6 +57,7 @@ export default function VisitDetailPage() {
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [selectedRecommendation, setSelectedRecommendation] = useState<RecommendationWithCreator | null>(null);
   const [file, setFile] = useState<File | null>(null);
+  const [reportNotes, setReportNotes] = useState('');
   const [newRecommendation, setNewRecommendation] = useState({
     description: '',
     sap_notification_number: '',
@@ -79,7 +85,7 @@ export default function VisitDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      const [visitRes, recommendationsRes, tasksRes] = await Promise.all([
+      const [visitRes, recommendationsRes, tasksRes, reportsRes] = await Promise.all([
         supabase
           .from('maintenance_visits')
           .select(`
@@ -111,6 +117,14 @@ export default function VisitDetailPage() {
           .select('*')
           .eq('visit_id', visitId)
           .order('due_date', { ascending: true }),
+        supabase
+          .from('visit_reports')
+          .select(`
+            *,
+            uploaded_by:users!visit_reports_uploaded_by_id_fkey(full_name)
+          `)
+          .eq('visit_id', visitId)
+          .order('uploaded_at', { ascending: false }),
       ]);
 
       if (visitRes.error) {
@@ -122,6 +136,7 @@ export default function VisitDetailPage() {
       if (visitRes.data) setVisit(visitRes.data as unknown as VisitDetails);
       if (recommendationsRes.data) setRecommendations(recommendationsRes.data as unknown as RecommendationWithCreator[]);
       if (tasksRes.data) setTasks(tasksRes.data);
+      if (reportsRes.data) setVisitReports(reportsRes.data as unknown as VisitReportWithUploader[]);
     } catch (err) {
       console.error('Error fetching visit data:', err);
       setError(err instanceof Error ? err.message : 'An error occurred loading visit data');
@@ -153,7 +168,7 @@ export default function VisitDetailPage() {
 
   const handleUploadReport = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file || !visit) return;
+    if (!file || !visit || !userProfile) return;
 
     setError(null);
     setSuccess(null);
@@ -161,8 +176,8 @@ export default function VisitDetailPage() {
 
     try {
       const fileExt = file.name.split('.').pop();
-      const fileName = `${visitId}-${Date.now()}.${fileExt}`;
-      const filePath = `reports/${fileName}`;
+      const storedFileName = `${visitId}-${Date.now()}.${fileExt}`;
+      const filePath = `reports/${storedFileName}`;
 
       const { error: uploadError } = await supabase.storage
         .from('reports')
@@ -170,22 +185,40 @@ export default function VisitDetailPage() {
 
       if (uploadError) throw uploadError;
 
-      const { error: updateError } = await supabase
-        .from('maintenance_visits')
-        .update({
-          report_file_path: filePath,
-          report_uploaded_at: new Date().toISOString(),
-          status: 'report_uploaded' as VisitStatus,
-        })
-        .eq('id', visitId);
+      // Insert into visit_reports table
+      const { error: insertError } = await supabase
+        .from('visit_reports')
+        .insert({
+          visit_id: visitId,
+          file_path: filePath,
+          file_name: file.name,
+          uploaded_by_id: userProfile.id,
+          uploaded_at: new Date().toISOString(),
+          notes: reportNotes || null,
+        });
 
-      if (updateError) throw updateError;
+      if (insertError) throw insertError;
+
+      // Also update maintenance_visits for backward compatibility (first report only)
+      if (visitReports.length === 0) {
+        const { error: updateError } = await supabase
+          .from('maintenance_visits')
+          .update({
+            report_file_path: filePath,
+            report_uploaded_at: new Date().toISOString(),
+            status: 'report_uploaded' as VisitStatus,
+          })
+          .eq('id', visitId);
+
+        if (updateError) throw updateError;
+      }
 
       setSuccess('Report uploaded successfully');
       await fetchVisitData();
       setTimeout(() => {
         setUploadModalOpen(false);
         setFile(null);
+        setReportNotes('');
       }, 1000);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
@@ -195,24 +228,64 @@ export default function VisitDetailPage() {
     }
   };
 
-  const handleDownloadReport = async () => {
-    if (!visit?.report_file_path) return;
+  const handleDownloadReport = async (filePath: string, fileName?: string) => {
+    if (!filePath) return;
 
     try {
       const { data, error } = await supabase.storage
         .from('reports')
-        .download(visit.report_file_path);
+        .download(filePath);
 
       if (error) throw error;
 
       const url = URL.createObjectURL(data);
       const a = document.createElement('a');
       a.href = url;
-      a.download = visit.report_file_path.split('/').pop() || 'report';
+      a.download = fileName || filePath.split('/').pop() || 'report';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      alert(message);
+    }
+  };
+
+  const handleDeleteReport = async (reportId: string, filePath: string) => {
+    if (!confirm('Are you sure you want to delete this report?')) return;
+
+    try {
+      // Delete from storage
+      const { error: storageError } = await supabase.storage
+        .from('reports')
+        .remove([filePath]);
+
+      if (storageError) {
+        console.warn('Could not delete file from storage:', storageError);
+      }
+
+      // Delete from visit_reports table
+      const { error: deleteError } = await supabase
+        .from('visit_reports')
+        .delete()
+        .eq('id', reportId);
+
+      if (deleteError) throw deleteError;
+
+      // If this was the only/last report, update visit status and clear legacy fields
+      if (visitReports.length === 1 && visit) {
+        await supabase
+          .from('maintenance_visits')
+          .update({
+            report_file_path: null,
+            report_uploaded_at: null,
+            status: 'date_confirmed' as VisitStatus,
+          })
+          .eq('id', visitId);
+      }
+
+      await fetchVisitData();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       alert(message);
@@ -655,9 +728,12 @@ export default function VisitDetailPage() {
   }
 
   const canConfirmDate = userProfile?.id === visit.vendor_coordinator_id || hasRole('admin');
-  const canUploadReport = (userProfile?.id === visit.vendor_coordinator_id || hasRole('admin')) && visit.status === 'date_confirmed';
+  // Allow uploading first report after date_confirmed, or additional reports any time before completion
+  const canUploadReport = (userProfile?.id === visit.vendor_coordinator_id || hasRole('admin'))
+    && (visit.status === 'date_confirmed' || (visitReports.length > 0 && visit.status !== 'completed' && visit.status !== 'cancelled'));
+  const hasReports = visitReports.length > 0 || visit.report_file_path || visit.no_report_reason;
   const canCreateRecommendation = (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin'))
-    && visit.report_file_path
+    && hasReports
     && visit.status !== 'completed'
     && visit.status !== 'cancelled';
   const canReview = userProfile?.id === visit.technical_engineer_id || hasRole('admin');
@@ -783,20 +859,54 @@ export default function VisitDetailPage() {
                 <p className="text-sm text-gray-500">Notification Number</p>
                 <p className="font-medium">{visit.notification_number || '-'}</p>
               </div>
-              <div>
-                <p className="text-sm text-gray-500">Report</p>
-                {visit.report_file_path ? (
-                  <Button variant="ghost" size="sm" onClick={handleDownloadReport} className="p-0">
-                    <Download className="w-4 h-4 mr-1" />
-                    Download
-                  </Button>
+              <div className="col-span-2">
+                <p className="text-sm text-gray-500 mb-2">Reports ({visitReports.length})</p>
+                {visitReports.length > 0 ? (
+                  <div className="space-y-2">
+                    {visitReports.map((report) => (
+                      <div key={report.id} className="flex items-center justify-between bg-gray-50 rounded-lg p-2">
+                        <div className="flex items-center space-x-3 flex-1 min-w-0">
+                          <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                          <div className="min-w-0">
+                            <p className="font-medium text-sm truncate">{report.file_name}</p>
+                            <p className="text-xs text-gray-500">
+                              Uploaded by {report.uploaded_by?.full_name} on {format(new Date(report.uploaded_at), 'MMM d, yyyy h:mm a')}
+                            </p>
+                            {report.notes && (
+                              <p className="text-xs text-gray-500 mt-1">{report.notes}</p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-1 flex-shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDownloadReport(report.file_path, report.file_name)}
+                            title="Download"
+                          >
+                            <Download className="w-4 h-4" />
+                          </Button>
+                          {hasRole('admin') && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteReport(report.id, report.file_path)}
+                              title="Delete"
+                            >
+                              <Trash2 className="w-4 h-4 text-red-500" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 ) : visit.no_report_reason ? (
                   <div>
                     <p className="text-amber-600 font-medium">No report available</p>
                     <p className="text-sm text-gray-500">{visit.no_report_reason}</p>
                   </div>
                 ) : (
-                  <p className="text-gray-400">Not uploaded</p>
+                  <p className="text-gray-400">No reports uploaded</p>
                 )}
               </div>
             </div>
@@ -1032,13 +1142,24 @@ export default function VisitDetailPage() {
                 });
               }
 
-              // Report uploaded or marked as unavailable
-              if (visit.report_uploaded_at) {
+              // Reports uploaded
+              visitReports.forEach(report => {
+                let details = `File: ${report.file_name}`;
+                if (report.uploaded_by?.full_name) {
+                  details += ` (by ${report.uploaded_by.full_name})`;
+                }
+                if (report.notes) {
+                  details += `. Notes: ${report.notes}`;
+                }
                 activities.push({
-                  date: visit.report_uploaded_at,
-                  event: 'Maintenance report uploaded',
+                  date: report.uploaded_at,
+                  event: 'Report uploaded',
+                  details,
                 });
-              } else if (visit.no_report_reason) {
+              });
+
+              // No report reason
+              if (visit.no_report_reason && visitReports.length === 0) {
                 activities.push({
                   date: visit.updated_at,
                   event: 'Marked as no report available',
@@ -1134,11 +1255,17 @@ export default function VisitDetailPage() {
       <Modal
         isOpen={uploadModalOpen}
         onClose={() => setUploadModalOpen(false)}
-        title="Upload Maintenance Report"
+        title={visitReports.length > 0 ? 'Upload Additional Report' : 'Upload Maintenance Report'}
       >
         <form onSubmit={handleUploadReport} className="space-y-4">
           {error && <Alert variant="error">{error}</Alert>}
           {success && <Alert variant="success">{success}</Alert>}
+
+          {visitReports.length > 0 && (
+            <div className="bg-blue-50 p-3 rounded-lg text-sm text-blue-800">
+              This visit already has {visitReports.length} report{visitReports.length > 1 ? 's' : ''}. You can upload additional reports if needed.
+            </div>
+          )}
 
           <Input
             label="Report File"
@@ -1147,6 +1274,15 @@ export default function VisitDetailPage() {
             onChange={(e) => setFile(e.target.files?.[0] || null)}
             required
             accept=".pdf,.doc,.docx,.xls,.xlsx"
+          />
+
+          <Textarea
+            label="Notes (optional)"
+            name="notes"
+            value={reportNotes}
+            onChange={(e) => setReportNotes(e.target.value)}
+            placeholder="Add any notes about this report..."
+            rows={2}
           />
 
           <div className="flex justify-end space-x-3 pt-4 border-t">

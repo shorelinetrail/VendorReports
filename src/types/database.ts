@@ -121,6 +121,20 @@ export interface SystemConfig {
   updated_at: string;
 }
 
+export interface VisitReport {
+  id: string;
+  visit_id: string;
+  visit?: MaintenanceVisit;
+  file_path: string;
+  file_name: string;
+  uploaded_by_id: string;
+  uploaded_by?: User;
+  uploaded_at: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // Database response types
 export interface Database {
   public: {
@@ -159,6 +173,11 @@ export interface Database {
         Row: SystemConfig;
         Insert: Omit<SystemConfig, 'id' | 'created_at' | 'updated_at'>;
         Update: Partial<Omit<SystemConfig, 'id' | 'created_at' | 'updated_at'>>;
+      };
+      visit_reports: {
+        Row: VisitReport;
+        Insert: Omit<VisitReport, 'id' | 'created_at' | 'updated_at' | 'visit' | 'uploaded_by'>;
+        Update: Partial<Omit<VisitReport, 'id' | 'created_at' | 'updated_at' | 'visit' | 'uploaded_by'>>;
       };
     };
   };
