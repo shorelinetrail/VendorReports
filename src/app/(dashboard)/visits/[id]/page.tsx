@@ -2,15 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check, RefreshCw, RotateCcw, Clock, FileX, Trash2 } from 'lucide-react';
+import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check, RefreshCw, RotateCcw, Clock, FileX, Trash2, Users } from 'lucide-react';
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { MaintenanceVisit, Recommendation, Task, VisitStatus, RecommendationStatus, VisitReport } from '@/types/database';
+import { MaintenanceVisit, Recommendation, Task, VisitStatus, RecommendationStatus, VisitReport, User } from '@/types/database';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
 import Input from '@/components/ui/Input';
 import Textarea from '@/components/ui/Textarea';
+import Select from '@/components/ui/Select';
 import Badge from '@/components/ui/Badge';
 import Alert from '@/components/ui/Alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -68,6 +69,13 @@ export default function VisitDetailPage() {
   const [rescheduleData, setRescheduleData] = useState({ new_date: '', reason: '' });
   const [noReportModalOpen, setNoReportModalOpen] = useState(false);
   const [noReportReason, setNoReportReason] = useState('');
+  const [reassignModalOpen, setReassignModalOpen] = useState(false);
+  const [users, setUsers] = useState<User[]>([]);
+  const [reassignData, setReassignData] = useState({
+    vendor_coordinator_id: '',
+    maintenance_engineer_id: '',
+    technical_engineer_id: '',
+  });
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -80,6 +88,18 @@ export default function VisitDetailPage() {
       fetchVisitData();
     }
   }, [visitId]);
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  const fetchUsers = async () => {
+    const { data } = await supabase
+      .from('users')
+      .select('*')
+      .order('full_name');
+    if (data) setUsers(data);
+  };
 
   const fetchVisitData = async () => {
     setLoading(true);
@@ -662,6 +682,50 @@ export default function VisitDetailPage() {
     }
   };
 
+  const openReassignModal = () => {
+    if (visit) {
+      setReassignData({
+        vendor_coordinator_id: visit.vendor_coordinator_id,
+        maintenance_engineer_id: visit.maintenance_engineer_id,
+        technical_engineer_id: visit.technical_engineer_id,
+      });
+      setReassignModalOpen(true);
+    }
+  };
+
+  const handleReassignTeam = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!visit) return;
+
+    setError(null);
+    setSuccess(null);
+    setSubmitting(true);
+
+    try {
+      const { error: updateError } = await supabase
+        .from('maintenance_visits')
+        .update({
+          vendor_coordinator_id: reassignData.vendor_coordinator_id,
+          maintenance_engineer_id: reassignData.maintenance_engineer_id,
+          technical_engineer_id: reassignData.technical_engineer_id,
+        })
+        .eq('id', visitId);
+
+      if (updateError) throw updateError;
+
+      setSuccess('Team members reassigned successfully');
+      await fetchVisitData();
+      setTimeout(() => {
+        setReassignModalOpen(false);
+      }, 1000);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   // Calculate workflow step based on status
   const getWorkflowStep = (status: VisitStatus): number => {
     const steps: Record<VisitStatus, number> = {
@@ -914,8 +978,14 @@ export default function VisitDetailPage() {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Assigned Team</CardTitle>
+            {hasRole('admin') && visit.status !== 'completed' && visit.status !== 'cancelled' && (
+              <Button variant="ghost" size="sm" onClick={openReassignModal}>
+                <Users className="w-4 h-4 mr-1" />
+                Reassign
+              </Button>
+            )}
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
@@ -1460,6 +1530,64 @@ export default function VisitDetailPage() {
             </Button>
             <Button type="submit" loading={submitting} disabled={!noReportReason.trim()}>
               Confirm
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Reassign Team Modal */}
+      <Modal
+        isOpen={reassignModalOpen}
+        onClose={() => setReassignModalOpen(false)}
+        title="Reassign Team Members"
+        size="lg"
+      >
+        <form onSubmit={handleReassignTeam} className="space-y-4">
+          {error && <Alert variant="error">{error}</Alert>}
+          {success && <Alert variant="success">{success}</Alert>}
+
+          <Select
+            label="Vendor Coordinator"
+            name="vendor_coordinator_id"
+            value={reassignData.vendor_coordinator_id}
+            onChange={(e) => setReassignData({ ...reassignData, vendor_coordinator_id: e.target.value })}
+            required
+            placeholder="Select Vendor Coordinator"
+            options={users
+              .filter(u => u.role === 'vendor_coordinator' || u.role === 'admin')
+              .map(user => ({ value: user.id, label: user.full_name }))}
+          />
+
+          <Select
+            label="Maintenance Engineer"
+            name="maintenance_engineer_id"
+            value={reassignData.maintenance_engineer_id}
+            onChange={(e) => setReassignData({ ...reassignData, maintenance_engineer_id: e.target.value })}
+            required
+            placeholder="Select Maintenance Engineer"
+            options={users
+              .filter(u => u.role === 'maintenance_engineer' || u.role === 'admin')
+              .map(user => ({ value: user.id, label: user.full_name }))}
+          />
+
+          <Select
+            label="Technical Engineer"
+            name="technical_engineer_id"
+            value={reassignData.technical_engineer_id}
+            onChange={(e) => setReassignData({ ...reassignData, technical_engineer_id: e.target.value })}
+            required
+            placeholder="Select Technical Engineer"
+            options={users
+              .filter(u => u.role === 'technical_engineer' || u.role === 'admin')
+              .map(user => ({ value: user.id, label: user.full_name }))}
+          />
+
+          <div className="flex justify-end space-x-3 pt-4 border-t">
+            <Button type="button" variant="secondary" onClick={() => setReassignModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" loading={submitting}>
+              Save Changes
             </Button>
           </div>
         </form>
