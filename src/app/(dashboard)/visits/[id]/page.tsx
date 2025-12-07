@@ -751,6 +751,28 @@ export default function VisitDetailPage() {
 
   const currentStep = visit ? getWorkflowStep(visit.status) : 1;
 
+  // Get who the workflow is waiting for at the current step
+  const getWaitingFor = (): { name: string; role: string } | null => {
+    if (!visit || visit.status === 'completed' || visit.status === 'cancelled') return null;
+
+    switch (visit.status) {
+      case 'scheduled':
+        return { name: visit.vendor_coordinator?.full_name || 'Vendor Coordinator', role: 'Vendor Coordinator' };
+      case 'date_confirmed':
+        return { name: visit.vendor_coordinator?.full_name || 'Vendor Coordinator', role: 'Vendor Coordinator' };
+      case 'report_uploaded':
+        return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer' };
+      case 'recommendations_created':
+        return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer' };
+      case 'in_review':
+        return { name: visit.technical_engineer?.full_name || 'Technical Engineer', role: 'Technical Engineer' };
+      default:
+        return null;
+    }
+  };
+
+  const waitingFor = getWaitingFor();
+
   const getStatusVariant = (status: string): 'pending' | 'in_progress' | 'completed' | 'cancelled' => {
     const variants: Record<string, 'pending' | 'in_progress' | 'completed' | 'cancelled'> = {
       scheduled: 'pending',
@@ -885,6 +907,16 @@ export default function VisitDetailPage() {
                 );
               })}
             </div>
+            {waitingFor && (
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <div className="flex items-center justify-center text-sm">
+                  <Clock className="w-4 h-4 text-amber-500 mr-2" />
+                  <span className="text-gray-600">Waiting for </span>
+                  <span className="font-medium text-gray-900 ml-1">{waitingFor.name}</span>
+                  <span className="text-gray-500 ml-1">({waitingFor.role})</span>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
