@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check, RefreshCw, RotateCcw, Clock, FileX, Trash2, Users, Edit3 } from 'lucide-react';
 import { format } from 'date-fns';
@@ -86,7 +86,9 @@ export default function VisitDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const supabase = createClient();
+
+  // Memoize supabase client to prevent recreation on each render
+  const supabase = useMemo(() => createClient(), []);
 
   const visitId = params.id as string;
 
@@ -796,8 +798,19 @@ export default function VisitDetailPage() {
     }
   };
 
-  // Calculate workflow step based on status
-  const getWorkflowStep = (status: VisitStatus): number => {
+  // Memoized workflow configuration (static data)
+  const workflowSteps = useMemo(() => [
+    { step: 1, label: 'Scheduled', description: 'Visit date set' },
+    { step: 2, label: 'Date Confirmed', description: 'Vendor coordinator confirmed' },
+    { step: 3, label: 'Report Uploaded', description: 'Maintenance report received' },
+    { step: 4, label: 'Recommendations', description: 'Engineer created recommendations' },
+    { step: 5, label: 'In Review', description: 'Technical review in progress' },
+    { step: 6, label: 'Completed', description: 'Visit closed' },
+  ], []);
+
+  // Memoized current step calculation
+  const currentStep = useMemo(() => {
+    if (!visit) return 1;
     const steps: Record<VisitStatus, number> = {
       scheduled: 1,
       date_confirmed: 2,
@@ -807,22 +820,11 @@ export default function VisitDetailPage() {
       completed: 6,
       cancelled: 0,
     };
-    return steps[status] || 1;
-  };
+    return steps[visit.status] || 1;
+  }, [visit?.status]);
 
-  const workflowSteps = [
-    { step: 1, label: 'Scheduled', description: 'Visit date set' },
-    { step: 2, label: 'Date Confirmed', description: 'Vendor coordinator confirmed' },
-    { step: 3, label: 'Report Uploaded', description: 'Maintenance report received' },
-    { step: 4, label: 'Recommendations', description: 'Engineer created recommendations' },
-    { step: 5, label: 'In Review', description: 'Technical review in progress' },
-    { step: 6, label: 'Completed', description: 'Visit closed' },
-  ];
-
-  const currentStep = visit ? getWorkflowStep(visit.status) : 1;
-
-  // Get who the workflow is waiting for at the current step and what action is needed
-  const getWaitingFor = (): { name: string; role: string; action: string } | null => {
+  // Memoized waiting for calculation
+  const waitingFor = useMemo(() => {
     if (!visit || visit.status === 'completed' || visit.status === 'cancelled') return null;
 
     switch (visit.status) {
@@ -839,11 +841,10 @@ export default function VisitDetailPage() {
       default:
         return null;
     }
-  };
+  }, [visit?.status, visit?.vendor_coordinator?.full_name, visit?.maintenance_engineer?.full_name, visit?.technical_engineer?.full_name]);
 
-  const waitingFor = getWaitingFor();
-
-  const getStatusVariant = (status: string): 'pending' | 'in_progress' | 'completed' | 'cancelled' => {
+  // Memoized status variant helper
+  const getStatusVariant = useCallback((status: string): 'pending' | 'in_progress' | 'completed' | 'cancelled' => {
     const variants: Record<string, 'pending' | 'in_progress' | 'completed' | 'cancelled'> = {
       scheduled: 'pending',
       date_confirmed: 'in_progress',
@@ -856,7 +857,7 @@ export default function VisitDetailPage() {
       approved: 'completed',
     };
     return variants[status] || 'pending';
-  };
+  }, []);
 
   if (loading) {
     return (
@@ -883,31 +884,116 @@ export default function VisitDetailPage() {
     );
   }
 
-  const canConfirmDate = userProfile?.id === visit.vendor_coordinator_id || hasRole('admin');
-  // Allow uploading first report after date_confirmed, or additional reports any time before completion
-  const canUploadReport = (userProfile?.id === visit.vendor_coordinator_id || hasRole('admin'))
-    && (visit.status === 'date_confirmed' || (visitReports.length > 0 && visit.status !== 'completed' && visit.status !== 'cancelled'));
-  const hasReports = visitReports.length > 0 || visit.report_file_path || visit.no_report_reason;
-  const canCreateRecommendation = (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin'))
-    && hasReports
-    && visit.status !== 'completed'
-    && visit.status !== 'cancelled';
-  const canReview = userProfile?.id === visit.technical_engineer_id || hasRole('admin');
-  const canReschedule = (userProfile?.id === visit.vendor_coordinator_id || hasRole('admin'))
-    && visit.status !== 'completed'
-    && visit.status !== 'cancelled';
+  // Memoized permission checks
+  const { canConfirmDate, canUploadReport, canCreateRecommendation, canReview, canReschedule, canCloseVisit, canReopenVisit, hasReports } = useMemo(() => {
+    const isAdmin = hasRole('admin');
+    const isVendorCoord = userProfile?.id === visit.vendor_coordinator_id;
+    const isMaintEng = userProfile?.id === visit.maintenance_engineer_id;
+    const isTechEng = userProfile?.id === visit.technical_engineer_id;
+    const isNotClosed = visit.status !== 'completed' && visit.status !== 'cancelled';
 
-  // Check if all recommendations are done and user can close the visit
-  const allRecommendationsDone = recommendations.length > 0 && recommendations.every(
-    r => r.status === 'completed' || r.status === 'cancelled'
-  );
-  const canCloseVisit = (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin'))
-    && visit.status !== 'completed'
-    && visit.status !== 'cancelled'
-    && allRecommendationsDone;
+    const _hasReports = visitReports.length > 0 || visit.report_file_path || visit.no_report_reason;
+    const allRecsDone = recommendations.length > 0 && recommendations.every(r => r.status === 'completed' || r.status === 'cancelled');
 
-  // Check if admin can reopen a completed visit
-  const canReopenVisit = hasRole('admin') && visit.status === 'completed';
+    return {
+      canConfirmDate: isVendorCoord || isAdmin,
+      canUploadReport: (isVendorCoord || isAdmin) && (visit.status === 'date_confirmed' || (visitReports.length > 0 && isNotClosed)),
+      hasReports: _hasReports,
+      canCreateRecommendation: (isMaintEng || isAdmin) && _hasReports && isNotClosed,
+      canReview: isTechEng || isAdmin,
+      canReschedule: (isVendorCoord || isAdmin) && isNotClosed,
+      canCloseVisit: (isMaintEng || isAdmin) && isNotClosed && allRecsDone,
+      canReopenVisit: isAdmin && visit.status === 'completed',
+    };
+  }, [visit.vendor_coordinator_id, visit.maintenance_engineer_id, visit.technical_engineer_id, visit.status, visit.report_file_path, visit.no_report_reason, visitReports.length, recommendations, userProfile?.id, hasRole]);
+
+  // Memoized activity log
+  const activities = useMemo(() => {
+    const items: { date: string; event: string; details?: string }[] = [];
+
+    // Visit created
+    if (visit.created_at) {
+      const originalScheduledDate = visit.rescheduled_from || visit.scheduled_date;
+      items.push({
+        date: visit.created_at,
+        event: 'Visit created',
+        details: `Scheduled for ${format(new Date(originalScheduledDate), 'MMM d, yyyy')}`,
+      });
+    }
+
+    // Date confirmed
+    if (visit.confirmed_date) {
+      items.push({
+        date: visit.confirmed_at || visit.updated_at,
+        event: 'Visit date confirmed',
+        details: `Confirmed for ${format(new Date(visit.confirmed_date), 'MMM d, yyyy')}`,
+      });
+    }
+
+    // Rescheduled
+    if (visit.rescheduled_at) {
+      let details = `From ${visit.rescheduled_from ? format(new Date(visit.rescheduled_from), 'MMM d') : 'previous date'} to ${format(new Date(visit.scheduled_date), 'MMM d, yyyy')}`;
+      if (visit.reschedule_reason) {
+        details += `. ${visit.reschedule_reason}`;
+      }
+      items.push({ date: visit.rescheduled_at, event: 'Visit rescheduled', details });
+    }
+
+    // Reports uploaded
+    visitReports.forEach(report => {
+      let details = report.file_name;
+      if (report.uploaded_by?.full_name) details += ` (${report.uploaded_by.full_name})`;
+      if (report.notes) details += `. ${report.notes}`;
+      items.push({ date: report.uploaded_at, event: 'Report uploaded', details });
+    });
+
+    // No report reason
+    if (visit.no_report_reason && visitReports.length === 0) {
+      items.push({ date: visit.updated_at, event: 'No report available', details: visit.no_report_reason });
+    }
+
+    // Recommendations
+    recommendations.forEach(rec => {
+      items.push({
+        date: rec.created_at,
+        event: 'Recommendation created',
+        details: rec.description.substring(0, 80) + (rec.description.length > 80 ? '...' : ''),
+      });
+      if (rec.reviewed_at) {
+        items.push({
+          date: rec.reviewed_at,
+          event: 'Recommendation reviewed',
+          details: `By ${rec.reviewed_by?.full_name || 'Technical Engineer'}`,
+        });
+      }
+      if (rec.completed_at) {
+        items.push({
+          date: rec.completed_at,
+          event: 'Recommendation completed',
+          details: rec.description.substring(0, 40) + (rec.description.length > 40 ? '...' : ''),
+        });
+      }
+      if (rec.cancelled_at) {
+        items.push({ date: rec.cancelled_at, event: 'Recommendation cancelled', details: rec.cancellation_reason || undefined });
+      }
+    });
+
+    // Tasks completed
+    const taskLabels: Record<string, string> = {
+      confirm_visit_date: 'Date confirmation task',
+      upload_report: 'Report upload task',
+      create_recommendations: 'Recommendations task',
+      review_recommendations: 'Review task',
+      technical_review: 'Technical review task',
+      close_visit: 'Close visit task',
+    };
+    tasks.filter(t => t.completed_at).forEach(task => {
+      items.push({ date: task.completed_at!, event: `${taskLabels[task.task_type] || task.task_type} completed` });
+    });
+
+    // Sort by date descending
+    return items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [visit, visitReports, recommendations, tasks]);
 
   return (
     <div className="space-y-6">
@@ -1397,148 +1483,31 @@ export default function VisitDetailPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-3 sm:space-y-4">
-            {/* Build activity log from visit data */}
-            {(() => {
-              const activities: { date: string; event: string; details?: string }[] = [];
-
-              // Visit created
-              if (visit.created_at) {
-                // Use rescheduled_from if available to show original scheduled date
-                const originalScheduledDate = visit.rescheduled_from || visit.scheduled_date;
-                activities.push({
-                  date: visit.created_at,
-                  event: 'Visit created',
-                  details: `Scheduled for ${format(new Date(originalScheduledDate), 'MMM d, yyyy')}`,
-                });
-              }
-
-              // Date confirmed
-              if (visit.confirmed_date) {
-                activities.push({
-                  date: visit.confirmed_at || visit.updated_at,
-                  event: 'Visit date confirmed',
-                  details: `Confirmed for ${format(new Date(visit.confirmed_date), 'MMM d, yyyy')}`,
-                });
-              }
-
-              // Rescheduled
-              if (visit.rescheduled_at) {
-                let details = `From ${visit.rescheduled_from ? format(new Date(visit.rescheduled_from), 'MMM d') : 'previous date'} to ${format(new Date(visit.scheduled_date), 'MMM d, yyyy')}`;
-                if (visit.reschedule_reason) {
-                  details += `. ${visit.reschedule_reason}`;
-                }
-                activities.push({
-                  date: visit.rescheduled_at,
-                  event: 'Visit rescheduled',
-                  details,
-                });
-              }
-
-              // Reports uploaded
-              visitReports.forEach(report => {
-                let details = report.file_name;
-                if (report.uploaded_by?.full_name) {
-                  details += ` (${report.uploaded_by.full_name})`;
-                }
-                if (report.notes) {
-                  details += `. ${report.notes}`;
-                }
-                activities.push({
-                  date: report.uploaded_at,
-                  event: 'Report uploaded',
-                  details,
-                });
-              });
-
-              // No report reason
-              if (visit.no_report_reason && visitReports.length === 0) {
-                activities.push({
-                  date: visit.updated_at,
-                  event: 'No report available',
-                  details: visit.no_report_reason,
-                });
-              }
-
-              // Recommendations created
-              recommendations.forEach(rec => {
-                activities.push({
-                  date: rec.created_at,
-                  event: 'Recommendation created',
-                  details: rec.description.substring(0, 80) + (rec.description.length > 80 ? '...' : ''),
-                });
-
-                if (rec.reviewed_at) {
-                  activities.push({
-                    date: rec.reviewed_at,
-                    event: 'Recommendation reviewed',
-                    details: `By ${rec.reviewed_by?.full_name || 'Technical Engineer'}`,
-                  });
-                }
-
-                if (rec.completed_at) {
-                  activities.push({
-                    date: rec.completed_at,
-                    event: 'Recommendation completed',
-                    details: rec.description.substring(0, 40) + (rec.description.length > 40 ? '...' : ''),
-                  });
-                }
-
-                if (rec.cancelled_at) {
-                  activities.push({
-                    date: rec.cancelled_at,
-                    event: 'Recommendation cancelled',
-                    details: rec.cancellation_reason || undefined,
-                  });
-                }
-              });
-
-              // Tasks completed
-              tasks.filter(t => t.completed_at).forEach(task => {
-                const taskLabels: Record<string, string> = {
-                  confirm_visit_date: 'Date confirmation task',
-                  upload_report: 'Report upload task',
-                  create_recommendations: 'Recommendations task',
-                  review_recommendations: 'Review task',
-                  technical_review: 'Technical review task',
-                  close_visit: 'Close visit task',
-                };
-                activities.push({
-                  date: task.completed_at!,
-                  event: `${taskLabels[task.task_type] || task.task_type} completed`,
-                });
-              });
-
-              // Sort by date descending (most recent first)
-              activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-              if (activities.length === 0) {
-                return <p className="text-gray-500 text-center py-4 text-sm">No activity recorded yet.</p>;
-              }
-
-              return (
-                <div className="relative">
-                  <div className="absolute left-3 sm:left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
-                  <div className="space-y-3 sm:space-y-4">
-                    {activities.map((activity, idx) => (
-                      <div key={idx} className="relative pl-8 sm:pl-10">
-                        <div className="absolute left-1.5 sm:left-2.5 w-3 h-3 bg-primary-500 rounded-full border-2 border-white" />
-                        <div className="bg-gray-50 rounded-lg p-2 sm:p-3">
-                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2">
-                            <p className="font-medium text-gray-900 text-sm">{activity.event}</p>
-                            <p className="text-[10px] sm:text-sm text-gray-500">
-                              {format(new Date(activity.date), 'MMM d, h:mm a')}
-                            </p>
-                          </div>
-                          {activity.details && (
-                            <p className="text-xs sm:text-sm text-gray-600 mt-1 line-clamp-2">{activity.details}</p>
-                          )}
+            {activities.length === 0 ? (
+              <p className="text-gray-500 text-center py-4 text-sm">No activity recorded yet.</p>
+            ) : (
+              <div className="relative">
+                <div className="absolute left-3 sm:left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
+                <div className="space-y-3 sm:space-y-4">
+                  {activities.map((activity, idx) => (
+                    <div key={idx} className="relative pl-8 sm:pl-10">
+                      <div className="absolute left-1.5 sm:left-2.5 w-3 h-3 bg-primary-500 rounded-full border-2 border-white" />
+                      <div className="bg-gray-50 rounded-lg p-2 sm:p-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2">
+                          <p className="font-medium text-gray-900 text-sm">{activity.event}</p>
+                          <p className="text-[10px] sm:text-sm text-gray-500">
+                            {format(new Date(activity.date), 'MMM d, h:mm a')}
+                          </p>
                         </div>
+                        {activity.details && (
+                          <p className="text-xs sm:text-sm text-gray-600 mt-1 line-clamp-2">{activity.details}</p>
+                        )}
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
-              );
-            })()}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
