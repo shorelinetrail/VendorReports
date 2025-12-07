@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check } from 'lucide-react';
+import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -54,6 +54,8 @@ export default function VisitDetailPage() {
     due_date: '',
   });
   const [reviewResponse, setReviewResponse] = useState('');
+  const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
+  const [rescheduleData, setRescheduleData] = useState({ new_date: '', reason: '' });
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -445,6 +447,77 @@ export default function VisitDetailPage() {
     }
   };
 
+  const handleRescheduleVisit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!visit) return;
+
+    setError(null);
+    setSuccess(null);
+    setSubmitting(true);
+
+    try {
+      // Store the old date for the notes
+      const oldDate = visit.scheduled_date;
+
+      // Update visit with new scheduled date and reset status
+      const { error: updateError } = await supabase
+        .from('maintenance_visits')
+        .update({
+          scheduled_date: rescheduleData.new_date,
+          confirmed_date: null,
+          status: 'scheduled' as VisitStatus,
+          reschedule_reason: rescheduleData.reason,
+          rescheduled_at: new Date().toISOString(),
+          rescheduled_from: oldDate,
+        })
+        .eq('id', visitId);
+
+      if (updateError) throw updateError;
+
+      // Cancel any pending confirm_visit_date tasks and create a new one
+      await supabase
+        .from('tasks')
+        .update({ status: 'cancelled' })
+        .eq('visit_id', visitId)
+        .eq('task_type', 'confirm_visit_date')
+        .in('status', ['pending', 'in_progress']);
+
+      // Create new confirm date task
+      if (visit.vendor_coordinator_id) {
+        const { data: configData } = await supabase
+          .from('system_config')
+          .select('config_value')
+          .eq('config_key', 'visit_confirmation_days')
+          .single();
+
+        const confirmDays = parseInt(configData?.config_value || '14', 10);
+        const dueDate = new Date(rescheduleData.new_date);
+        dueDate.setDate(dueDate.getDate() - confirmDays);
+
+        await supabase.from('tasks').insert({
+          visit_id: visitId,
+          task_type: 'confirm_visit_date',
+          assigned_to_id: visit.vendor_coordinator_id,
+          status: 'pending',
+          due_date: dueDate.toISOString().split('T')[0],
+          notes: `Rescheduled from ${oldDate}. Reason: ${rescheduleData.reason}`,
+        });
+      }
+
+      setSuccess('Visit rescheduled successfully');
+      await fetchVisitData();
+      setTimeout(() => {
+        setRescheduleModalOpen(false);
+        setRescheduleData({ new_date: '', reason: '' });
+      }, 1000);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   // Calculate workflow step based on status
   const getWorkflowStep = (status: VisitStatus): number => {
     const steps: Record<VisitStatus, number> = {
@@ -510,6 +583,9 @@ export default function VisitDetailPage() {
   const canUploadReport = (userProfile?.id === visit.vendor_coordinator_id || hasRole('admin')) && visit.status === 'date_confirmed';
   const canCreateRecommendation = (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && visit.report_file_path;
   const canReview = userProfile?.id === visit.technical_engineer_id || hasRole('admin');
+  const canReschedule = (userProfile?.id === visit.vendor_coordinator_id || hasRole('admin'))
+    && visit.status !== 'completed'
+    && visit.status !== 'cancelled';
 
   // Check if all recommendations are done and user can close the visit
   const allRecommendationsDone = recommendations.length > 0 && recommendations.every(
@@ -681,6 +757,12 @@ export default function VisitDetailPage() {
               <Button onClick={() => setRecommendationModalOpen(true)}>
                 <Plus className="w-4 h-4 mr-2" />
                 Add Recommendation
+              </Button>
+            )}
+            {canReschedule && (
+              <Button variant="secondary" onClick={() => setRescheduleModalOpen(true)}>
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Reschedule Visit
               </Button>
             )}
             {canCloseVisit && (
@@ -908,6 +990,53 @@ export default function VisitDetailPage() {
             </Button>
             <Button type="submit" loading={submitting}>
               Submit Review
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Reschedule Visit Modal */}
+      <Modal
+        isOpen={rescheduleModalOpen}
+        onClose={() => setRescheduleModalOpen(false)}
+        title="Reschedule Visit"
+      >
+        <form onSubmit={handleRescheduleVisit} className="space-y-4">
+          {error && <Alert variant="error">{error}</Alert>}
+          {success && <Alert variant="success">{success}</Alert>}
+
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <p className="text-sm text-gray-500">Current Scheduled Date</p>
+            <p className="font-medium">
+              {visit?.scheduled_date && format(new Date(visit.scheduled_date), 'MMMM d, yyyy')}
+            </p>
+          </div>
+
+          <Input
+            label="New Scheduled Date"
+            name="new_date"
+            type="date"
+            value={rescheduleData.new_date}
+            onChange={(e) => setRescheduleData({ ...rescheduleData, new_date: e.target.value })}
+            required
+          />
+
+          <Textarea
+            label="Reason for Rescheduling"
+            name="reason"
+            value={rescheduleData.reason}
+            onChange={(e) => setRescheduleData({ ...rescheduleData, reason: e.target.value })}
+            required
+            placeholder="Explain why the visit needs to be rescheduled..."
+            rows={3}
+          />
+
+          <div className="flex justify-end space-x-3 pt-4 border-t">
+            <Button type="button" variant="secondary" onClick={() => setRescheduleModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" loading={submitting}>
+              Reschedule Visit
             </Button>
           </div>
         </form>

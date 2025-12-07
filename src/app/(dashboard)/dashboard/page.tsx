@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Calendar, CheckSquare, AlertTriangle, FileText, ClipboardList, TrendingUp } from 'lucide-react';
+import { Calendar, CheckSquare, AlertTriangle, FileText, ClipboardList, TrendingUp, ChevronRight } from 'lucide-react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -35,6 +36,7 @@ interface PendingTask {
   task_type: string;
   due_date: string;
   status: string;
+  visit_id: string;
   visit: {
     routine: {
       plan_number: string;
@@ -125,6 +127,7 @@ export default function DashboardPage() {
             task_type,
             due_date,
             status,
+            visit_id,
             visit:maintenance_visits(
               routine:maintenance_routines(
                 plan_number,
@@ -150,12 +153,12 @@ export default function DashboardPage() {
   }, [userProfile, authLoading, dataLoading, dataLoaded]);
 
   const statCards = [
-    { title: 'Active Routines', value: stats.totalRoutines, icon: Calendar, color: 'bg-blue-500' },
-    { title: 'Active Visits', value: stats.activeVisits, icon: ClipboardList, color: 'bg-green-500' },
-    { title: 'My Pending Tasks', value: stats.pendingTasks, icon: CheckSquare, color: 'bg-yellow-500' },
-    { title: 'Overdue Tasks', value: stats.overdueTasks, icon: AlertTriangle, color: 'bg-red-500' },
-    { title: 'Open Recommendations', value: stats.openRecommendations, icon: FileText, color: 'bg-purple-500' },
-    { title: 'Completed This Month', value: stats.completedThisMonth, icon: TrendingUp, color: 'bg-teal-500' },
+    { title: 'Active Routines', value: stats.totalRoutines, icon: Calendar, color: 'bg-blue-500', href: '/routines' },
+    { title: 'Active Visits', value: stats.activeVisits, icon: ClipboardList, color: 'bg-green-500', href: '/visits' },
+    { title: 'My Pending Tasks', value: stats.pendingTasks, icon: CheckSquare, color: 'bg-yellow-500', href: '/tasks' },
+    { title: 'Overdue Tasks', value: stats.overdueTasks, icon: AlertTriangle, color: 'bg-red-500', href: '/tasks' },
+    { title: 'Open Recommendations', value: stats.openRecommendations, icon: FileText, color: 'bg-purple-500', href: '/recommendations' },
+    { title: 'Completed This Month', value: stats.completedThisMonth, icon: TrendingUp, color: 'bg-teal-500', href: '/visits?status=completed' },
   ];
 
   const formatTaskType = (type: string) => {
@@ -201,19 +204,24 @@ export default function DashboardPage() {
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {statCards.map((stat) => (
-          <Card key={stat.title}>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className={`${stat.color} p-3 rounded-lg`}>
-                  <stat.icon className="w-6 h-6 text-white" />
+          <Link key={stat.title} href={stat.href}>
+            <Card className="hover:shadow-md transition-shadow cursor-pointer">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <div className={`${stat.color} p-3 rounded-lg`}>
+                      <stat.icon className="w-6 h-6 text-white" />
+                    </div>
+                    <div className="ml-4">
+                      <p className="text-sm text-gray-500">{stat.title}</p>
+                      <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-gray-400" />
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm text-gray-500">{stat.title}</p>
-                  <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </Link>
         ))}
       </div>
 
@@ -229,24 +237,29 @@ export default function DashboardPage() {
             ) : (
               <div className="space-y-4">
                 {upcomingVisits.map((visit) => (
-                  <div key={visit.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <div>
-                      <p className="font-medium text-gray-900">
-                        {visit.routine?.plan_number}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        {visit.routine?.vendor?.name}
-                      </p>
+                  <Link key={visit.id} href={`/visits/${visit.id}`}>
+                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer">
+                      <div>
+                        <p className="font-medium text-gray-900">
+                          {visit.routine?.plan_number}
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          {visit.routine?.vendor?.name}
+                        </p>
+                      </div>
+                      <div className="flex items-center">
+                        <div className="text-right mr-2">
+                          <p className="text-sm font-medium text-gray-900">
+                            {format(new Date(visit.scheduled_date), 'MMM d, yyyy')}
+                          </p>
+                          <Badge variant={getStatusVariant(visit.status)} size="sm">
+                            {visit.status.replace('_', ' ')}
+                          </Badge>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-gray-400" />
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm font-medium text-gray-900">
-                        {format(new Date(visit.scheduled_date), 'MMM d, yyyy')}
-                      </p>
-                      <Badge variant={getStatusVariant(visit.status)} size="sm">
-                        {visit.status.replace('_', ' ')}
-                      </Badge>
-                    </div>
-                  </div>
+                  </Link>
                 ))}
               </div>
             )}
@@ -266,24 +279,29 @@ export default function DashboardPage() {
                 {pendingTasks.map((task) => {
                   const isOverdue = isBefore(new Date(task.due_date), new Date());
                   return (
-                    <div key={task.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div>
-                        <p className="font-medium text-gray-900">
-                          {formatTaskType(task.task_type)}
-                        </p>
-                        <p className="text-sm text-gray-500">
-                          {task.visit?.routine?.plan_number} - {task.visit?.routine?.vendor?.name}
-                        </p>
+                    <Link key={task.id} href={`/visits/${task.visit_id}`}>
+                      <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer">
+                        <div>
+                          <p className="font-medium text-gray-900">
+                            {formatTaskType(task.task_type)}
+                          </p>
+                          <p className="text-sm text-gray-500">
+                            {task.visit?.routine?.plan_number} - {task.visit?.routine?.vendor?.name}
+                          </p>
+                        </div>
+                        <div className="flex items-center">
+                          <div className="text-right mr-2">
+                            <p className={`text-sm font-medium ${isOverdue ? 'text-red-600' : 'text-gray-900'}`}>
+                              {format(new Date(task.due_date), 'MMM d, yyyy')}
+                            </p>
+                            <Badge variant={isOverdue ? 'overdue' : 'pending'} size="sm">
+                              {isOverdue ? 'Overdue' : task.status.replace('_', ' ')}
+                            </Badge>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-gray-400" />
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className={`text-sm font-medium ${isOverdue ? 'text-red-600' : 'text-gray-900'}`}>
-                          {format(new Date(task.due_date), 'MMM d, yyyy')}
-                        </p>
-                        <Badge variant={isOverdue ? 'overdue' : 'pending'} size="sm">
-                          {isOverdue ? 'Overdue' : task.status.replace('_', ' ')}
-                        </Badge>
-                      </div>
-                    </div>
+                    </Link>
                   );
                 })}
               </div>

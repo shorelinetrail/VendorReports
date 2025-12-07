@@ -133,9 +133,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
       {/* Sidebar */}
       <div
-        className={`fixed inset-y-0 left-0 z-30 transform lg:relative lg:translate-x-0 transition-transform duration-200 ease-in-out ${
+        className={`fixed left-0 z-30 transform lg:relative lg:translate-x-0 transition-transform duration-200 ease-in-out ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        } ${showAdminBar ? 'pt-10' : ''}`}
+        } ${showAdminBar ? 'top-10 bottom-0' : 'inset-y-0'}`}
       >
         <Sidebar />
       </div>

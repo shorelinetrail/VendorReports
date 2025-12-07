@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, Eye } from 'lucide-react';
+import { Plus, Pencil, Trash2, Eye, Upload, Download } from 'lucide-react';
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -55,6 +55,9 @@ export default function RoutinesPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [bulkUploadModalOpen, setBulkUploadModalOpen] = useState(false);
+  const [bulkFile, setBulkFile] = useState<File | null>(null);
+  const [bulkUploadResults, setBulkUploadResults] = useState<{ success: number; failed: number; errors: string[] } | null>(null);
   const supabase = createClient();
 
   const canManage = hasRole(['admin', 'vendor_coordinator']);
@@ -153,9 +156,38 @@ export default function RoutinesPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this routine?')) return;
+    if (!confirm('Are you sure you want to delete this routine?\n\nThis will also delete all associated visits, tasks, and recommendations. This action cannot be undone.')) return;
 
     try {
+      // First get all visits for this routine
+      const { data: visits } = await supabase
+        .from('maintenance_visits')
+        .select('id')
+        .eq('routine_id', id);
+
+      if (visits && visits.length > 0) {
+        const visitIds = visits.map(v => v.id);
+
+        // Delete all recommendations for these visits
+        await supabase
+          .from('recommendations')
+          .delete()
+          .in('visit_id', visitIds);
+
+        // Delete all tasks for these visits
+        await supabase
+          .from('tasks')
+          .delete()
+          .in('visit_id', visitIds);
+
+        // Delete all visits for this routine
+        await supabase
+          .from('maintenance_visits')
+          .delete()
+          .eq('routine_id', id);
+      }
+
+      // Finally delete the routine
       const { error } = await supabase
         .from('maintenance_routines')
         .delete()
@@ -175,6 +207,144 @@ export default function RoutinesPage() {
       .map((u) => ({ value: u.id, label: u.full_name }));
   };
 
+  const handleDownloadTemplate = () => {
+    const headers = [
+      'plan_number',
+      'description',
+      'vendor_name',
+      'interval_months',
+      'start_date',
+      'call_horizon_months',
+      'vendor_coordinator_email',
+      'maintenance_engineer_email',
+      'technical_engineer_email',
+      'is_active',
+      'requires_technical_review',
+    ];
+
+    const exampleRow = [
+      'MP-001',
+      'Annual maintenance for equipment XYZ',
+      vendors[0]?.name || 'Vendor Name',
+      '12',
+      format(new Date(), 'yyyy-MM-dd'),
+      '1',
+      users.find(u => u.role === 'vendor_coordinator')?.email || 'coordinator@example.com',
+      users.find(u => u.role === 'maintenance_engineer')?.email || 'engineer@example.com',
+      users.find(u => u.role === 'technical_engineer')?.email || 'tech@example.com',
+      'true',
+      'true',
+    ];
+
+    const csv = [headers.join(','), exampleRow.join(',')].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'maintenance-plans-template.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleBulkUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bulkFile) return;
+
+    setError(null);
+    setSuccess(null);
+    setSubmitting(true);
+    setBulkUploadResults(null);
+
+    try {
+      const text = await bulkFile.text();
+      const lines = text.split('\n').filter(line => line.trim());
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+
+      const results = { success: 0, failed: 0, errors: [] as string[] };
+
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map(v => v.trim());
+        const row: Record<string, string> = {};
+        headers.forEach((h, idx) => {
+          row[h] = values[idx] || '';
+        });
+
+        try {
+          // Look up vendor by name
+          const vendor = vendors.find(v => v.name.toLowerCase() === row.vendor_name?.toLowerCase());
+          if (!vendor) {
+            results.errors.push(`Row ${i + 1}: Vendor "${row.vendor_name}" not found`);
+            results.failed++;
+            continue;
+          }
+
+          // Look up users by email
+          const coordinator = users.find(u => u.email?.toLowerCase() === row.vendor_coordinator_email?.toLowerCase());
+          const maintEngineer = users.find(u => u.email?.toLowerCase() === row.maintenance_engineer_email?.toLowerCase());
+          const techEngineer = users.find(u => u.email?.toLowerCase() === row.technical_engineer_email?.toLowerCase());
+
+          if (!coordinator) {
+            results.errors.push(`Row ${i + 1}: Vendor coordinator "${row.vendor_coordinator_email}" not found`);
+            results.failed++;
+            continue;
+          }
+          if (!maintEngineer) {
+            results.errors.push(`Row ${i + 1}: Maintenance engineer "${row.maintenance_engineer_email}" not found`);
+            results.failed++;
+            continue;
+          }
+          if (!techEngineer) {
+            results.errors.push(`Row ${i + 1}: Technical engineer "${row.technical_engineer_email}" not found`);
+            results.failed++;
+            continue;
+          }
+
+          // Insert the routine
+          const { error: insertError } = await supabase.from('maintenance_routines').insert({
+            plan_number: row.plan_number,
+            description: row.description,
+            vendor_id: vendor.id,
+            interval_months: parseInt(row.interval_months) || 12,
+            start_date: row.start_date,
+            call_horizon_months: parseInt(row.call_horizon_months) || 1,
+            vendor_coordinator_id: coordinator.id,
+            maintenance_engineer_id: maintEngineer.id,
+            technical_engineer_id: techEngineer.id,
+            is_active: row.is_active?.toLowerCase() !== 'false',
+            requires_technical_review: row.requires_technical_review?.toLowerCase() !== 'false',
+          });
+
+          if (insertError) {
+            results.errors.push(`Row ${i + 1}: ${insertError.message}`);
+            results.failed++;
+          } else {
+            results.success++;
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          results.errors.push(`Row ${i + 1}: ${message}`);
+          results.failed++;
+        }
+      }
+
+      setBulkUploadResults(results);
+      if (results.success > 0) {
+        setSuccess(`Successfully imported ${results.success} maintenance plan(s)`);
+        await fetchData();
+      }
+      if (results.failed > 0) {
+        setError(`Failed to import ${results.failed} row(s). See details below.`);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -191,10 +361,16 @@ export default function RoutinesPage() {
           <p className="text-gray-600">Manage scheduled maintenance plans</p>
         </div>
         {canManage && (
-          <Button onClick={() => handleOpenModal()}>
-            <Plus className="w-4 h-4 mr-2" />
-            Add Routine
-          </Button>
+          <div className="flex items-center space-x-3">
+            <Button variant="secondary" onClick={() => setBulkUploadModalOpen(true)}>
+              <Upload className="w-4 h-4 mr-2" />
+              Bulk Upload
+            </Button>
+            <Button onClick={() => handleOpenModal()}>
+              <Plus className="w-4 h-4 mr-2" />
+              Add Routine
+            </Button>
+          </div>
         )}
       </div>
 
@@ -393,6 +569,94 @@ export default function RoutinesPage() {
             </Button>
             <Button type="submit" loading={submitting}>
               {editingId ? 'Update' : 'Create'} Routine
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Bulk Upload Modal */}
+      <Modal
+        isOpen={bulkUploadModalOpen}
+        onClose={() => {
+          setBulkUploadModalOpen(false);
+          setBulkFile(null);
+          setBulkUploadResults(null);
+          setError(null);
+          setSuccess(null);
+        }}
+        title="Bulk Upload Maintenance Plans"
+        size="lg"
+      >
+        <form onSubmit={handleBulkUpload} className="space-y-4">
+          {error && <Alert variant="error">{error}</Alert>}
+          {success && <Alert variant="success">{success}</Alert>}
+
+          <div className="bg-gray-50 p-4 rounded-lg space-y-3">
+            <p className="text-sm text-gray-600">
+              Upload a CSV file with maintenance plans. Each row will create a new maintenance routine.
+            </p>
+            <Button type="button" variant="secondary" size="sm" onClick={handleDownloadTemplate}>
+              <Download className="w-4 h-4 mr-2" />
+              Download Template
+            </Button>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-gray-700">Required Columns:</p>
+            <ul className="text-xs text-gray-500 list-disc list-inside space-y-1">
+              <li><strong>plan_number</strong> - Unique identifier (e.g., MP-001)</li>
+              <li><strong>description</strong> - Description of the maintenance plan</li>
+              <li><strong>vendor_name</strong> - Name of the vendor (must exist in system)</li>
+              <li><strong>interval_months</strong> - Maintenance interval in months</li>
+              <li><strong>start_date</strong> - Start date (YYYY-MM-DD format)</li>
+              <li><strong>call_horizon_months</strong> - Months before due date to create visit</li>
+              <li><strong>vendor_coordinator_email</strong> - Email of vendor coordinator</li>
+              <li><strong>maintenance_engineer_email</strong> - Email of maintenance engineer</li>
+              <li><strong>technical_engineer_email</strong> - Email of technical engineer</li>
+              <li><strong>is_active</strong> - true/false</li>
+              <li><strong>requires_technical_review</strong> - true/false</li>
+            </ul>
+          </div>
+
+          <Input
+            label="CSV File"
+            name="csv_file"
+            type="file"
+            accept=".csv"
+            onChange={(e) => setBulkFile(e.target.files?.[0] || null)}
+            required
+          />
+
+          {bulkUploadResults && bulkUploadResults.errors.length > 0 && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 max-h-48 overflow-y-auto">
+              <p className="text-sm font-medium text-red-800 mb-2">
+                Import Errors ({bulkUploadResults.errors.length}):
+              </p>
+              <ul className="text-xs text-red-700 space-y-1">
+                {bulkUploadResults.errors.map((err, i) => (
+                  <li key={i}>{err}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="flex justify-end space-x-3 pt-4 border-t">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setBulkUploadModalOpen(false);
+                setBulkFile(null);
+                setBulkUploadResults(null);
+                setError(null);
+                setSuccess(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" loading={submitting} disabled={!bulkFile}>
+              <Upload className="w-4 h-4 mr-2" />
+              Upload & Import
             </Button>
           </div>
         </form>

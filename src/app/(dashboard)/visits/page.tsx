@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Plus, Upload, Eye, CheckCircle } from 'lucide-react';
+import { Plus, Upload, Eye, CheckCircle, Trash2 } from 'lucide-react';
 import { format, addMonths, isBefore } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -198,6 +198,38 @@ export default function VisitsPage() {
     }
   };
 
+  const handleDeleteVisit = async (visit: VisitWithDetails) => {
+    if (!confirm(`Are you sure you want to delete visit for ${visit.routine?.plan_number}?\n\nThis will also delete all associated tasks and recommendations. This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      // Delete associated recommendations first
+      await supabase
+        .from('recommendations')
+        .delete()
+        .eq('visit_id', visit.id);
+
+      // Delete associated tasks
+      await supabase
+        .from('tasks')
+        .delete()
+        .eq('visit_id', visit.id);
+
+      // Delete the visit
+      const { error } = await supabase
+        .from('maintenance_visits')
+        .delete()
+        .eq('id', visit.id);
+
+      if (error) throw error;
+      await fetchData();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      alert(message);
+    }
+  };
+
   const getStatusVariant = (status: string): 'pending' | 'in_progress' | 'completed' | 'cancelled' => {
     const variants: Record<string, 'pending' | 'in_progress' | 'completed' | 'cancelled'> = {
       scheduled: 'pending',
@@ -334,6 +366,16 @@ export default function VisitsPage() {
                         title="Upload Report"
                       >
                         <Upload className="w-4 h-4 text-blue-500" />
+                      </Button>
+                    )}
+                    {hasRole('admin') && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDeleteVisit(visit)}
+                        title="Delete Visit"
+                      >
+                        <Trash2 className="w-4 h-4 text-red-500" />
                       </Button>
                     )}
                   </div>
