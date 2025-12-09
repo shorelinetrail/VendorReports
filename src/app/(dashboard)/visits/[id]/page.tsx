@@ -845,31 +845,6 @@ export default function VisitDetailPage() {
     return variants[status] || 'pending';
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-      </div>
-    );
-  }
-
-  if (!visit) {
-    return (
-      <div className="text-center py-12">
-        <h2 className="text-xl font-semibold text-gray-900">Visit not found</h2>
-        {error && (
-          <p className="text-red-600 mt-2">{error}</p>
-        )}
-        <p className="text-gray-500 mt-2 text-sm">Visit ID: {visitId}</p>
-        <Link href="/visits">
-          <Button variant="secondary" className="mt-4">
-            Back to Visits
-          </Button>
-        </Link>
-      </div>
-    );
-  }
-
   // Memoized permission checks
   const { canConfirmDate, canUploadReport, canCreateRecommendation, canReview, canReschedule, canCloseVisit, canReopenVisit, hasReports } = useMemo(() => {
     if (!visit) {
@@ -995,6 +970,31 @@ export default function VisitDetailPage() {
     // Sort by date descending
     return items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [visit, visitReports, recommendations, tasks]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+      </div>
+    );
+  }
+
+  if (!visit) {
+    return (
+      <div className="text-center py-12">
+        <h2 className="text-xl font-semibold text-gray-900">Visit not found</h2>
+        {error && (
+          <p className="text-red-600 mt-2">{error}</p>
+        )}
+        <p className="text-gray-500 mt-2 text-sm">Visit ID: {visitId}</p>
+        <Link href="/visits">
+          <Button variant="secondary" className="mt-4">
+            Back to Visits
+          </Button>
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
