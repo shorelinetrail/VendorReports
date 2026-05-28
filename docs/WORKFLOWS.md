@@ -102,7 +102,7 @@ advances the per-visit **task chain** via the shared helpers in `src/lib/workflo
 Vendor coordinator (or admin) confirms the date via a **date-picker modal**
 (`handleConfirmDate`). Sets `confirmed_date`, `confirmed_at`, status → `date_confirmed`,
 completes the `confirm_visit_date` task, and queues the `upload_report` task (due
-`report_upload_weeks` after the confirmed date).
+`report_upload_days` after the confirmed date).
 
 ### Step 2 → 3 — Upload report (or mark none)
 `handleUploadReport`: uploads the file to the private `reports` bucket (object key
@@ -112,30 +112,47 @@ when the visit was awaiting a report, advances status → `report_uploaded`, com
 *No Report Available* (`handleNoReportAvailable`) records a reason and does the same status
 / task advance with no file.
 
-### Step 3 → 4/5 — Create recommendations
-`handleCreateRecommendation` **branches on the routine's `requires_technical_review` flag**:
-- If review required: recommendation starts `in_review` with `sent_for_review = true`,
-  visit → `in_review`, and a `technical_review` task is created for the technical engineer
-  (linked to the recommendation via its `notes`), due `technical_review_days` out.
-- If not required: recommendation starts `open`, visit → `recommendations_created`.
-- Either way, the `create_recommendations` task is completed.
+### Step 3 → 4 — Create recommendations (drafts)
+`handleCreateRecommendation` adds recommendations as **drafts** (`status = 'open'`,
+`sent_for_review = false`) and moves the visit to `recommendations_created`. **Nothing is
+sent to the technical engineer at this point** — adding a recommendation also clears the
+"finalised" flag (`recommendations_complete = false`). The maintenance engineer can also
+**forward** this step to another engineer with a comment (`handleForwardRecommendations`),
+which reassigns the maintenance engineer and their `create_recommendations` task.
+
+### Step 4 → 5 — Finalise the recommendation phase (explicit gate)
+The engineer must explicitly finish before the workflow advances:
+- **All Recommendations Created** (`handleAllRecommendationsCreated`, needs ≥1 rec): sets
+  `recommendations_complete = true`. If the routine requires review, every still-draft rec is
+  sent to the technical engineer now (status → `in_review`, a per-rec `technical_review` task
+  is created), and the visit → `in_review`; otherwise visit → `recommendations_created`.
+- **No Recommendations Required** (`handleNoRecommendationsRequired`, only when there are no
+  recs): sets `no_recommendations_required = true`. If the routine requires review, visit →
+  `in_review` and a `technical_review` task is raised for the technical engineer to **approve
+  the "none required" decision**; otherwise it is auto-approved and closeable.
 
 ### Step 5 — Technical review
 `handleSubmitReview`. The technical engineer records a structured `review_decision`:
 - `no_action` → recommendation marked `completed` immediately.
-- `request_sap` → `approved`; a SAP notification number + due date must later be filled in
-  (`handleSaveSapDetails`) before it can be completed.
-- `other_action` → `approved` with an action description and an `action_assigned_to_id`.
+- `request_sap` → `approved`; the maintenance engineer records the SAP notification via
+  `handleSaveSapDetails`, which **completes the recommendation in the same step** (no separate
+  complete action).
+- `other_action` → `approved` with an action description and an `action_assigned_to_id`;
+  completed by the engineer when done.
 
 Submitting a review completes **only that recommendation's** `technical_review` task
-(matched by `notes`), and queues a `close_visit` task if it resolved the last open one.
+(matched by `notes`) and queues a `close_visit` task if it resolved the last open one.
+For a **no-recommendations** declaration the technical engineer instead uses
+*Approve — No Recommendations* (`handleApproveNoRecommendations`) or *Reject*
+(`handleRejectNoRecommendations`, which returns the visit to `report_uploaded`).
 
 ### Step 6 — Close visit
-*Close Visit* (`handleCloseVisit`) is enabled for the maintenance engineer/admin once a
-report (or no-report reason) is recorded and **no recommendation is still open** — including
-the common case of a visit with **no recommendations at all**. It sets visit → `completed`
+*Close Visit* (`handleCloseVisit`) is enabled for the maintenance engineer/admin once: a
+report (or no-report reason) exists, the phase has been **finalised**
+(`recommendations_complete`), every recommendation is resolved, and — for a no-recs
+declaration under review — the technical engineer has approved. It sets visit → `completed`
 and sweeps any remaining open workflow tasks to completed. Admins can *Reopen* a completed
-visit (`handleReopenVisit`), which recomputes status to `in_review` or `recommendations_created`.
+visit (`handleReopenVisit`).
 
 ### Side transitions
 - **Reschedule** (`handleRescheduleVisit`): allowed only while `scheduled`/`date_confirmed`
@@ -144,6 +161,8 @@ visit (`handleReopenVisit`), which recomputes status to `in_review` or `recommen
   date across repeated reschedules, cancels the old confirm task and creates a fresh one.
 - **Reassign team** (admin only, `handleReassignTeam`): swaps the three assigned users on
   the visit. Does **not** reassign existing open tasks to the new people (open gap #9).
+- **Report upload** is permitted for any assigned team member (coordinator, maintenance or
+  technical engineer) or admin; only the coordinator is assigned an upload task.
 
 An **activity log** is reconstructed on the client (`activities` memo) by stitching together
 timestamps across the visit, reports, recommendations, and completed tasks. (The durable,
@@ -156,11 +175,14 @@ queryable history now lives in `audit_log`.)
 - `task_type` ∈ `confirm_visit_date`, `upload_report`, `create_recommendations`,
   `review_recommendations`, `technical_review`, `close_visit`. (`close_visit` was added to
   the SQL `task_type` enum in migration 011.)
-- The chain is now driven end-to-end (see `src/lib/workflow/tasks.ts`): `confirm_visit_date`
+- The chain is driven end-to-end (see `src/lib/workflow/tasks.ts`): `confirm_visit_date`
   (generator) → `upload_report` (on confirm) → `create_recommendations` (on report) →
-  `technical_review` (per recommendation, when review is required) → `close_visit` (when the
-  last recommendation resolves). Each step completes its predecessor.
-- The Tasks page lists tasks by due date and lets users mark them in-progress/complete.
+  `technical_review` (raised on **finalise**, per recommendation or once for a no-recs
+  declaration, when review is required) → `close_visit` (when the last recommendation
+  resolves / a no-recs declaration is approved). Each step completes its predecessor.
+- The **My Tasks** page is read-only: there are no manual start/complete buttons. A task
+  clears only when its underlying workflow step is actually performed on the visit, so a task
+  can't be dismissed without the work being done. (As a result `in_progress` is now unused.)
 - **Overdue** is both shown client-side and **persisted**: a second daily cron
   (`/api/tasks/expire`, 07:00 UTC) flips past-due `pending`/`in_progress` tasks to the
   `overdue` status. Visit handlers complete tasks regardless of `overdue` state, and closing
@@ -190,7 +212,9 @@ queryable history now lives in `audit_log`.)
 - **Vendors** (`vendors/page.tsx`) — admin-only; same deactivate/reactivate soft-delete.
 - **Vendors** (`vendors/page.tsx`) — admin-only CRUD; delete blocked if referenced by a routine.
 - **Settings** (`settings/page.tsx`) — admin-only editing of the four `system_config`
-  deadline values, plus the manual visit-generation trigger.
+  deadline values (all expressed **in days** — `visit_confirmation_days`,
+  `report_upload_days`, `recommendations_review_days`, `technical_review_days`), plus the
+  manual visit-generation trigger.
 
 ### Auth / onboarding
 - **Public self-signup is disabled.** `/signup` shows a notice and redirects to `/login`;
@@ -307,8 +331,9 @@ A separate step-through of the visit lifecycle surfaced eight design errors, all
 (see `src/lib/workflow/tasks.ts`, the visit pages, the generator, and migration 015):
 
 1. **Zero-recommendation visits couldn't be closed.** The close gate required at least one
-   recommendation. Now closable once a report (or no-report reason) is recorded and no
-   recommendation is still open — covering the common "nothing to flag" case.
+   recommendation. *(Superseded — see §8: a zero-rec visit is now closed via the explicit
+   "No Recommendations Required" declaration, with technical approval when review is required,
+   rather than a silent zero-rec close.)*
 2. **Confirming/uploading never completed the matching task.** Each transition now completes
    its task, so they no longer linger and (since the overdue cron) age into permanent overdue.
 3. **Reschedule regenerated the original occurrence.** The generator now skips canonical dates
@@ -331,6 +356,36 @@ is preserved for de-dup; pre-existing mid-reschedule rows aren't retroactively c
 
 ---
 
-*Originally generated 2026-05-28; updated to reflect migrations 008–015 and the lifecycle
-fixes. Inline line numbers were removed as the files have since changed; handler names are
-stable references.*
+## 8. Recommendation-phase finalisation & assorted refinements
+
+Migrations 016–018 and the related UI work introduced an explicit close-out of the
+recommendation phase plus several UX changes:
+
+- **Explicit finalisation (migration 017).** Recommendations are created as drafts; the
+  maintenance engineer chooses **All Recommendations Created** or **No Recommendations
+  Required** before the workflow advances. The visit only enters technical review on
+  finalisation. New `maintenance_visits` columns: `recommendations_complete`,
+  `no_recommendations_required`, `no_recommendations_at`, `no_recommendations_approved`,
+  `no_recommendations_reviewed_by_id`, `no_recommendations_reviewed_at`. Closure now requires
+  finalisation (so the §7 #1 "silent zero-rec close" no longer applies).
+- **Technical approval of "no recommendations".** When the routine requires review, the
+  technical engineer approves/rejects the declaration; reject returns the visit to
+  `report_uploaded` and re-queues the create-recommendations task.
+- **Forward step.** The maintenance engineer can hand the create-recommendations step to
+  another engineer with a comment (reassigns the engineer + their task).
+- **SAP completes the recommendation.** Recording the requested SAP notification completes the
+  recommendation in one step; the separate per-rec "send for review" and redundant "complete"
+  actions were removed (sending now happens on finalise).
+- **Engineer uploads (migration 016).** Any assigned team member (or admin) may upload reports;
+  only the coordinator is assigned an upload task. Storage + `visit_reports` RLS updated.
+- **Deadlines in days (migration 018).** `report_upload_weeks` replaced by `report_upload_days`
+  (default 14); the validation trigger updated to match.
+- **Cosmetic.** Role/status badges are capitalised (shared `Badge`); the system is branded
+  **VendorTrak**; the technical-review decision options use sentence case and the review
+  comment is optional (justification still required for "no further action").
+
+---
+
+*Originally generated 2026-05-28; updated to reflect migrations 008–018, the lifecycle fixes,
+and the recommendation-phase finalisation flow. Inline line numbers were removed as the files
+have since changed; handler names are stable references.*
