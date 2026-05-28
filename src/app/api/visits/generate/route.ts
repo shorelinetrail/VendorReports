@@ -102,9 +102,19 @@ export async function POST(request: NextRequest) {
           .select('id')
           .eq('routine_id', routine.id)
           .eq('scheduled_date', dateStr)
-          .single();
+          .maybeSingle();
 
-        if (!existingVisit) {
+        // A visit may have been rescheduled away from this canonical date.
+        // rescheduled_from preserves the original occurrence date, so don't
+        // regenerate a duplicate for a slot that has already been moved.
+        const { data: rescheduledAway } = await supabaseAdmin
+          .from('maintenance_visits')
+          .select('id')
+          .eq('routine_id', routine.id)
+          .eq('rescheduled_from', dateStr)
+          .limit(1);
+
+        if (!existingVisit && (!rescheduledAway || rescheduledAway.length === 0)) {
           // Create the visit
           const { data: newVisit, error: createError } = await supabaseAdmin
             .from('maintenance_visits')
@@ -136,16 +146,18 @@ export async function POST(request: NextRequest) {
             const taskDueDate = addMonths(visitDate, 0); // Same as visit date initially
             taskDueDate.setDate(taskDueDate.getDate() - confirmDays);
 
-            // Only create task if due date is in the future
-            if (isAfter(taskDueDate, today)) {
-              await supabaseAdmin.from('tasks').insert({
-                visit_id: newVisit.id,
-                task_type: 'confirm_visit_date',
-                assigned_to_id: routine.vendor_coordinator_id,
-                status: 'pending',
-                due_date: format(taskDueDate, 'yyyy-MM-dd'),
-              });
-            }
+            // Always create the confirmation task. If the ideal due date has
+            // already passed (visit generated inside the confirmation window),
+            // clamp it to today so the coordinator still gets a task instead of
+            // the visit silently having none.
+            const effectiveDueDate = isAfter(taskDueDate, today) ? taskDueDate : today;
+            await supabaseAdmin.from('tasks').insert({
+              visit_id: newVisit.id,
+              task_type: 'confirm_visit_date',
+              assigned_to_id: routine.vendor_coordinator_id,
+              status: 'pending',
+              due_date: format(effectiveDueDate, 'yyyy-MM-dd'),
+            });
           }
         }
       }

@@ -6,6 +6,12 @@ import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, 
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import {
+  completeVisitTasks,
+  createUploadReportTask,
+  createRecommendationsTask,
+  createCloseVisitTask,
+} from '@/lib/workflow/tasks';
 import { MaintenanceVisit, Recommendation, Task, VisitStatus, RecommendationStatus, VisitReport, User, ReviewDecisionType } from '@/types/database';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
@@ -205,6 +211,11 @@ export default function VisitDetailPage() {
         .eq('id', visitId);
 
       if (error) throw error;
+
+      // Close the confirmation task and queue the report upload task.
+      await completeVisitTasks(supabase, visitId, ['confirm_visit_date']);
+      await createUploadReportTask(supabase, visitId, visit?.vendor_coordinator_id, new Date(confirmDateValue));
+
       await fetchVisitData();
       setConfirmDateModalOpen(false);
       setSuccess('Visit date confirmed');
@@ -290,6 +301,10 @@ export default function VisitDetailPage() {
           .eq('id', visitId);
 
         if (updateError) throw updateError;
+
+        // Close the upload task and queue the recommendations task.
+        await completeVisitTasks(supabase, visitId, ['upload_report']);
+        await createRecommendationsTask(supabase, visitId, visit.maintenance_engineer_id);
       }
 
       await fetchVisitData();
@@ -421,6 +436,9 @@ export default function VisitDetailPage() {
         });
       }
 
+      // The engineer has acted on the report; close the create-recommendations task.
+      await completeVisitTasks(supabase, visitId, ['create_recommendations']);
+
       await fetchVisitData();
       setRecommendationModalOpen(false);
       setNewRecommendation({ description: '', sap_notification_number: '', due_date: '' });
@@ -513,7 +531,8 @@ export default function VisitDetailPage() {
 
       if (error) throw error;
 
-      // Mark the technical review task as completed
+      // Mark only this recommendation's technical review task as completed
+      // (tasks are linked to a recommendation via their notes).
       await supabase
         .from('tasks')
         .update({
@@ -522,8 +541,19 @@ export default function VisitDetailPage() {
         })
         .eq('visit_id', visitId)
         .eq('task_type', 'technical_review')
-        .eq('assigned_to_id', userProfile.id)
+        .eq('notes', `Review recommendation: ${selectedRecommendation.id}`)
         .in('status', ['pending', 'in_progress', 'overdue']);
+
+      // If this review resolved the recommendation (no action) and it was the
+      // last open one, queue the close-visit task.
+      if (newStatus === 'completed') {
+        const allResolved = recommendations.length > 0 && recommendations.every(r =>
+          r.id === selectedRecommendation.id ? true : (r.status === 'completed' || r.status === 'cancelled')
+        );
+        if (allResolved && visit) {
+          await createCloseVisitTask(supabase, visitId, visit.maintenance_engineer_id);
+        }
+      }
 
       await fetchVisitData();
       setReviewModalOpen(false);
@@ -538,6 +568,16 @@ export default function VisitDetailPage() {
       setError(message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // If resolving this recommendation leaves none open, queue the close-visit task.
+  const maybeQueueCloseTask = async (changedRecId: string) => {
+    const allResolved = recommendations.length > 0 && recommendations.every(r =>
+      r.id === changedRecId ? true : (r.status === 'completed' || r.status === 'cancelled')
+    );
+    if (allResolved && visit) {
+      await createCloseVisitTask(supabase, visitId, visit.maintenance_engineer_id);
     }
   };
 
@@ -559,6 +599,7 @@ export default function VisitDetailPage() {
         .eq('id', recommendationId);
 
       if (error) throw error;
+      await maybeQueueCloseTask(recommendationId);
       await fetchVisitData();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
@@ -622,6 +663,7 @@ export default function VisitDetailPage() {
         .eq('id', recommendationId);
 
       if (error) throw error;
+      await maybeQueueCloseTask(recommendationId);
       await fetchVisitData();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
@@ -643,18 +685,14 @@ export default function VisitDetailPage() {
 
       if (visitError) throw visitError;
 
-      // Mark any pending close_visit task as completed
-      if (userProfile) {
-        await supabase
-          .from('tasks')
-          .update({
-            status: 'completed',
-            completed_at: new Date().toISOString(),
-          })
-          .eq('visit_id', visitId)
-          .eq('task_type', 'close_visit')
-          .in('status', ['pending', 'in_progress', 'overdue']);
-      }
+      // Sweep any remaining open workflow tasks closed so none linger as overdue.
+      await completeVisitTasks(supabase, visitId, [
+        'confirm_visit_date',
+        'upload_report',
+        'create_recommendations',
+        'technical_review',
+        'close_visit',
+      ]);
 
       await fetchVisitData();
     } catch (err: unknown) {
@@ -774,6 +812,10 @@ export default function VisitDetailPage() {
         .eq('id', visitId);
 
       if (updateError) throw updateError;
+
+      // Close the upload task and queue the recommendations task.
+      await completeVisitTasks(supabase, visitId, ['upload_report']);
+      if (visit) await createRecommendationsTask(supabase, visitId, visit.maintenance_engineer_id);
 
       await fetchVisitData();
       setNoReportModalOpen(false);
@@ -912,7 +954,8 @@ export default function VisitDetailPage() {
     const isNotClosed = visit.status !== 'completed' && visit.status !== 'cancelled';
 
     const _hasReports = visitReports.length > 0 || !!visit.no_report_reason;
-    const allRecsDone = recommendations.length > 0 && recommendations.every(r => r.status === 'completed' || r.status === 'cancelled');
+    // No recommendation is still awaiting action (true when there are none).
+    const noOpenRecs = recommendations.every(r => r.status === 'completed' || r.status === 'cancelled');
 
     return {
       canConfirmDate: isVendorCoord || isAdmin,
@@ -920,8 +963,11 @@ export default function VisitDetailPage() {
       hasReports: _hasReports,
       canCreateRecommendation: (isMaintEng || isAdmin) && _hasReports && isNotClosed,
       canReview: isTechEng || isAdmin,
-      canReschedule: (isVendorCoord || isAdmin) && isNotClosed,
-      canCloseVisit: (isMaintEng || isAdmin) && isNotClosed && allRecsDone,
+      // Reschedule only makes sense before a report exists for the visit.
+      canReschedule: (isVendorCoord || isAdmin) && (visit.status === 'scheduled' || visit.status === 'date_confirmed'),
+      // Closable once a report (or no-report reason) is recorded and nothing is
+      // left open — including the common case of a visit with no recommendations.
+      canCloseVisit: (isMaintEng || isAdmin) && isNotClosed && _hasReports && noOpenRecs,
       canReopenVisit: isAdmin && visit.status === 'completed',
     };
   }, [visit, visitReports.length, recommendations, userProfile?.id, hasRole]);
@@ -1391,7 +1437,7 @@ export default function VisitDetailPage() {
                           <Edit3 className="w-3 h-3 mr-1" />SAP
                         </Button>
                       )}
-                      {(rec.status === 'open' || rec.status === 'approved') && (
+                      {(rec.status === 'open' || rec.status === 'approved') && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
                         <>
                           <Button
                             variant="ghost"
@@ -1498,7 +1544,7 @@ export default function VisitDetailPage() {
                                 <Edit3 className="w-4 h-4" />
                               </Button>
                             )}
-                            {(rec.status === 'open' || rec.status === 'approved') && (
+                            {(rec.status === 'open' || rec.status === 'approved') && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
                               <>
                                 <Button
                                   variant="ghost"

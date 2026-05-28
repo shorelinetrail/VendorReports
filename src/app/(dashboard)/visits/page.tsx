@@ -5,6 +5,7 @@ import { Plus, Upload, Eye, CheckCircle, Trash2 } from 'lucide-react';
 import { format, addMonths, isBefore } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { completeVisitTasks, createUploadReportTask, createRecommendationsTask } from '@/lib/workflow/tasks';
 import { MaintenanceVisit, MaintenanceRoutine, VisitStatus } from '@/types/database';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
@@ -158,6 +159,9 @@ export default function VisitsPage() {
           .eq('id', selectedVisit.id);
 
         if (updateError) throw updateError;
+
+        await completeVisitTasks(supabase, selectedVisit.id, ['upload_report']);
+        await createRecommendationsTask(supabase, selectedVisit.id, selectedVisit.maintenance_engineer_id);
       }
 
       setSuccess('Report uploaded successfully');
@@ -190,6 +194,10 @@ export default function VisitsPage() {
         .eq('id', visit.id);
 
       if (error) throw error;
+
+      await completeVisitTasks(supabase, visit.id, ['confirm_visit_date']);
+      await createUploadReportTask(supabase, visit.id, visit.vendor_coordinator_id, new Date(confirmedDate));
+
       await fetchData();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
