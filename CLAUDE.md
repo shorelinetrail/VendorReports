@@ -45,7 +45,7 @@ The four roles are `admin`, `vendor_coordinator`, `maintenance_engineer`, `techn
 
 Public self-signup is **disabled** — `/signup` just redirects to `/login`. Accounts are created only by an admin through the Users page, which calls the service-role `src/app/api/users/route.ts`. RLS write policies are scoped to the assigned `*_id` columns on a visit (see migration 009), mirroring the per-visit checks the UI performs.
 
-Entities with history are **soft-deleted**: `users`, `vendors`, and `maintenance_routines` carry `is_active`, and the UI deactivates/reactivates rather than hard-deleting. Inactive users/vendors are excluded from assignment dropdowns.
+Entities with history are **soft-deleted**: `users`, `vendors`, and `maintenance_routines` carry `is_active`, and the UI deactivates/reactivates rather than hard-deleting. Inactive users/vendors are excluded from assignment dropdowns. Deactivation is **archive-only** — it does not revoke an active session or block login (auth/RLS still authorize by role). To revoke a person's access, delete their auth user in the Supabase dashboard.
 
 Every write to the core tables is recorded in an append-only `audit_log` table via DB triggers (migration 008); it captures the actor (`auth.uid()`, null for cron/service-role), action, and before/after row JSON. Only admins can read it, and UPDATE/DELETE on it are blocked.
 
