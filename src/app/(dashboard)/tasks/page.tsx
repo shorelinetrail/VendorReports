@@ -18,11 +18,14 @@ interface TaskWithDetails extends Omit<Task, 'visit' | 'assigned_to'> {
   visit: {
     id: string;
     scheduled_date: string;
+    is_adhoc: boolean;
+    adhoc_description: string | null;
     routine: {
       plan_number: string;
       description: string;
       vendor: { name: string };
-    };
+    } | null;
+    vendor: { name: string } | null;
   };
   assigned_to: {
     full_name: string;
@@ -63,11 +66,14 @@ export default function TasksPage() {
           visit:maintenance_visits(
             id,
             scheduled_date,
+            is_adhoc,
+            adhoc_description,
             routine:maintenance_routines(
               plan_number,
               description,
               vendor:vendors(name)
-            )
+            ),
+            vendor:vendors!maintenance_visits_vendor_id_fkey(name)
           ),
           assigned_to:users!tasks_assigned_to_id_fkey(full_name)
         `)
@@ -277,11 +283,11 @@ export default function TasksPage() {
                     </span>
                   </TableCell>
                   <TableCell>
-                    <p className="font-medium">{task.visit?.routine?.plan_number}</p>
-                    {task.visit?.routine?.description && (
-                      <p className="text-xs text-gray-500 whitespace-normal max-w-xs">{task.visit.routine.description}</p>
+                    <p className="font-medium">{task.visit?.routine?.plan_number || (task.visit?.is_adhoc ? 'Breakdown' : '-')}</p>
+                    {(task.visit?.routine?.description || task.visit?.adhoc_description) && (
+                      <p className="text-xs text-gray-500 whitespace-normal max-w-xs">{task.visit?.routine?.description || task.visit?.adhoc_description}</p>
                     )}
-                    <p className="text-sm text-gray-500">{task.visit?.routine?.vendor?.name}</p>
+                    <p className="text-sm text-gray-500">{task.visit?.routine?.vendor?.name || task.visit?.vendor?.name}</p>
                   </TableCell>
                   {showAllUsers && (
                     <TableCell>{task.assigned_to?.full_name}</TableCell>

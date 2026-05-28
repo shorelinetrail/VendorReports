@@ -24,13 +24,10 @@ interface UpcomingVisit {
   id: string;
   scheduled_date: string;
   status: string;
-  routine: {
-    plan_number: string;
-    description: string;
-    vendor: {
-      name: string;
-    };
-  };
+  is_adhoc?: boolean;
+  adhoc_description?: string | null;
+  routine: { plan_number: string; description: string; vendor: { name: string } } | null;
+  vendor: { name: string } | null;
 }
 
 interface PendingTask {
@@ -40,12 +37,9 @@ interface PendingTask {
   status: string;
   visit_id: string;
   visit: {
-    routine: {
-      plan_number: string;
-      vendor: {
-        name: string;
-      };
-    };
+    is_adhoc?: boolean;
+    routine: { plan_number: string; vendor: { name: string } } | null;
+    vendor: { name: string } | null;
   };
 }
 
@@ -53,13 +47,10 @@ interface CalendarVisit {
   id: string;
   scheduled_date: string;
   status: string;
-  routine: {
-    plan_number: string;
-    description: string;
-    vendor: {
-      name: string;
-    };
-  };
+  is_adhoc?: boolean;
+  adhoc_description?: string | null;
+  routine: { plan_number: string; description: string; vendor: { name: string } } | null;
+  vendor: { name: string } | null;
 }
 
 export default function DashboardPage() {
@@ -132,11 +123,14 @@ export default function DashboardPage() {
             id,
             scheduled_date,
             status,
+            is_adhoc,
+            adhoc_description,
             routine:maintenance_routines(
               plan_number,
               description,
               vendor:vendors(name)
-            )
+            ),
+            vendor:vendors!maintenance_visits_vendor_id_fkey(name)
           `)
           .gte('scheduled_date', today.toISOString().split('T')[0])
           .lte('scheduled_date', addDays(today, 30).toISOString().split('T')[0])
@@ -156,10 +150,12 @@ export default function DashboardPage() {
             status,
             visit_id,
             visit:maintenance_visits(
+              is_adhoc,
               routine:maintenance_routines(
                 plan_number,
                 vendor:vendors(name)
-              )
+              ),
+              vendor:vendors!maintenance_visits_vendor_id_fkey(name)
             )
           `)
           .eq('assigned_to_id', userProfile.id)
@@ -178,11 +174,14 @@ export default function DashboardPage() {
             id,
             scheduled_date,
             status,
+            is_adhoc,
+            adhoc_description,
             routine:maintenance_routines(
               plan_number,
               description,
               vendor:vendors(name)
-            )
+            ),
+            vendor:vendors!maintenance_visits_vendor_id_fkey(name)
           `)
           .gte('scheduled_date', calendarStart.toISOString().split('T')[0])
           .lte('scheduled_date', calendarEnd.toISOString().split('T')[0])
@@ -205,8 +204,8 @@ export default function DashboardPage() {
     return calendarVisits.map((visit) => ({
       id: visit.id,
       date: visit.scheduled_date,
-      title: visit.routine?.plan_number || 'Visit',
-      subtitle: visit.routine?.vendor?.name,
+      title: visit.routine?.plan_number || (visit.is_adhoc ? 'Breakdown' : 'Visit'),
+      subtitle: visit.routine?.vendor?.name || visit.vendor?.name,
       status: visit.status as CalendarEvent['status'],
     }));
   }, [calendarVisits]);
@@ -350,10 +349,10 @@ export default function DashboardPage() {
                               {event.title}
                             </p>
                             <p className="text-sm text-gray-500 truncate">
-                              {visit?.routine?.vendor?.name}
+                              {visit?.routine?.vendor?.name || visit?.vendor?.name}
                             </p>
                             <p className="text-xs text-gray-400 mt-1 line-clamp-2">
-                              {visit?.routine?.description}
+                              {visit?.routine?.description || visit?.adhoc_description}
                             </p>
                           </div>
                           <Badge variant={getStatusVariant(event.status)} size="sm" className="flex-shrink-0 ml-2">
@@ -386,10 +385,10 @@ export default function DashboardPage() {
                     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer">
                       <div>
                         <p className="font-medium text-gray-900">
-                          {visit.routine?.plan_number}
+                          {visit.routine?.plan_number || (visit.is_adhoc ? 'Breakdown' : 'Visit')}
                         </p>
                         <p className="text-sm text-gray-500">
-                          {visit.routine?.vendor?.name}
+                          {visit.routine?.vendor?.name || visit.vendor?.name}
                         </p>
                       </div>
                       <div className="flex items-center">
@@ -431,7 +430,7 @@ export default function DashboardPage() {
                             {formatTaskType(task.task_type)}
                           </p>
                           <p className="text-sm text-gray-500">
-                            {task.visit?.routine?.plan_number} - {task.visit?.routine?.vendor?.name}
+                            {(task.visit?.routine?.plan_number || (task.visit?.is_adhoc ? 'Breakdown' : 'Visit'))} - {task.visit?.routine?.vendor?.name || task.visit?.vendor?.name}
                           </p>
                         </div>
                         <div className="flex items-center">

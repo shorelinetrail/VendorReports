@@ -60,8 +60,14 @@ export interface MaintenanceRoutine {
 
 export interface MaintenanceVisit {
   id: string;
-  routine_id: string;
+  routine_id: string | null;
   routine?: MaintenanceRoutine;
+  vendor_id: string | null;
+  vendor?: Vendor;
+  is_adhoc: boolean;
+  adhoc_description: string | null;
+  adhoc_reason: string | null;
+  requires_technical_review: boolean | null;
   scheduled_date: string;
   confirmed_date: string | null;
   confirmed_at: string | null;
@@ -183,8 +189,8 @@ export interface Database {
       };
       maintenance_visits: {
         Row: MaintenanceVisit;
-        Insert: Omit<MaintenanceVisit, 'id' | 'created_at' | 'updated_at' | 'routine' | 'vendor_coordinator' | 'maintenance_engineer' | 'technical_engineer'>;
-        Update: Partial<Omit<MaintenanceVisit, 'id' | 'created_at' | 'updated_at' | 'routine' | 'vendor_coordinator' | 'maintenance_engineer' | 'technical_engineer'>>;
+        Insert: Omit<MaintenanceVisit, 'id' | 'created_at' | 'updated_at' | 'routine' | 'vendor' | 'vendor_coordinator' | 'maintenance_engineer' | 'technical_engineer' | 'vendor_id' | 'is_adhoc' | 'adhoc_description' | 'adhoc_reason' | 'requires_technical_review'> & Partial<Pick<MaintenanceVisit, 'vendor_id' | 'is_adhoc' | 'adhoc_description' | 'adhoc_reason' | 'requires_technical_review'>>;
+        Update: Partial<Omit<MaintenanceVisit, 'id' | 'created_at' | 'updated_at' | 'routine' | 'vendor' | 'vendor_coordinator' | 'maintenance_engineer' | 'technical_engineer'>>;
       };
       tasks: {
         Row: Task;

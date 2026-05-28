@@ -25,14 +25,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import Link from 'next/link';
 
-interface VisitDetails extends Omit<MaintenanceVisit, 'routine' | 'vendor_coordinator' | 'maintenance_engineer' | 'technical_engineer'> {
+interface VisitDetails extends Omit<MaintenanceVisit, 'routine' | 'vendor' | 'vendor_coordinator' | 'maintenance_engineer' | 'technical_engineer'> {
+  // null for ad-hoc / breakdown visits, which carry their own vendor + flags.
   routine: {
     id: string;
     plan_number: string;
     description: string;
     requires_technical_review: boolean;
     vendor: { id: string; name: string };
-  };
+  } | null;
+  vendor: { id: string; name: string } | null;
   vendor_coordinator: { id: string; full_name: string; email: string };
   maintenance_engineer: { id: string; full_name: string; email: string };
   technical_engineer: { id: string; full_name: string; email: string };
@@ -40,6 +42,14 @@ interface VisitDetails extends Omit<MaintenanceVisit, 'routine' | 'vendor_coordi
   reschedule_reason?: string | null;
   rescheduled_at?: string | null;
   rescheduled_from?: string | null;
+}
+
+// Technical review is governed by the routine for plan visits, or by the
+// per-visit flag for ad-hoc visits.
+function requiresReviewFor(v: VisitDetails | null): boolean {
+  if (!v) return true;
+  if (v.routine) return v.routine.requires_technical_review ?? true;
+  return v.requires_technical_review ?? true;
 }
 
 interface RecommendationWithCreator extends Omit<Recommendation, 'created_by' | 'reviewed_by' | 'action_assigned_to'> {
@@ -143,6 +153,7 @@ export default function VisitDetailPage() {
               requires_technical_review,
               vendor:vendors(id, name)
             ),
+            vendor:vendors!maintenance_visits_vendor_id_fkey(id, name),
             vendor_coordinator:users!maintenance_visits_vendor_coordinator_id_fkey(id, full_name, email),
             maintenance_engineer:users!maintenance_visits_maintenance_engineer_id_fkey(id, full_name, email),
             technical_engineer:users!maintenance_visits_technical_engineer_id_fkey(id, full_name, email)
@@ -453,7 +464,7 @@ export default function VisitDetailPage() {
     setSubmitting(true);
 
     try {
-      const requiresReview = visit.routine?.requires_technical_review ?? true;
+      const requiresReview = requiresReviewFor(visit);
       const toSend = recommendations.filter(r => r.status === 'open' && !r.sent_for_review);
 
       if (requiresReview && toSend.length > 0) {
@@ -491,7 +502,7 @@ export default function VisitDetailPage() {
   // Maintenance engineer declares that no recommendations are required.
   const handleNoRecommendationsRequired = async () => {
     if (!visit) return;
-    const requiresReview = visit.routine?.requires_technical_review ?? true;
+    const requiresReview = requiresReviewFor(visit);
     const message = requiresReview
       ? 'Declare that no recommendations are required? This will be sent to the technical engineer to approve.'
       : 'Declare that no recommendations are required?';
@@ -716,7 +727,7 @@ export default function VisitDetailPage() {
     }
     // A draft recommendation on a review-required routine must go through the
     // technical engineer (via "All Recommendations Created") before completion.
-    if (rec?.status === 'open' && (visit?.routine?.requires_technical_review ?? true)) {
+    if (rec?.status === 'open' && requiresReviewFor(visit)) {
       alert('This recommendation must be sent for technical review before it can be completed. Use "All Recommendations Created".');
       return;
     }
@@ -1183,7 +1194,7 @@ export default function VisitDetailPage() {
     const isNotClosed = visit.status !== 'completed' && visit.status !== 'cancelled';
 
     const _hasReports = visitReports.length > 0 || !!visit.no_report_reason;
-    const reqReview = visit.routine?.requires_technical_review ?? true;
+    const reqReview = requiresReviewFor(visit);
     const hasRecs = recommendations.length > 0;
     // Every recommendation resolved (true when there are none).
     const recsResolved = recommendations.every(r => r.status === 'completed' || r.status === 'cancelled');
@@ -1369,10 +1380,14 @@ export default function VisitDetailPage() {
           </Button>
         </Link>
         <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">
-            Visit: {visit.routine?.plan_number}
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate flex items-center gap-2">
+            Visit: {visit.routine?.plan_number || (visit.is_adhoc ? 'Breakdown' : '—')}
+            {visit.is_adhoc && <Badge variant="warning">Breakdown</Badge>}
           </h1>
-          <p className="text-sm sm:text-base text-gray-600 line-clamp-2">{visit.routine?.description}</p>
+          <p className="text-sm sm:text-base text-gray-600 line-clamp-2">{visit.routine?.description || visit.adhoc_description}</p>
+          {visit.is_adhoc && visit.adhoc_reason && (
+            <p className="text-xs text-gray-500 mt-1">Breakdown: {visit.adhoc_reason}</p>
+          )}
         </div>
       </div>
 
@@ -1453,7 +1468,7 @@ export default function VisitDetailPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div>
                 <p className="text-xs sm:text-sm text-gray-500">Vendor</p>
-                <p className="font-medium text-sm sm:text-base">{visit.routine?.vendor?.name}</p>
+                <p className="font-medium text-sm sm:text-base">{visit.routine?.vendor?.name || visit.vendor?.name || '-'}</p>
               </div>
               <div>
                 <p className="text-xs sm:text-sm text-gray-500">Status</p>
@@ -1753,7 +1768,7 @@ export default function VisitDetailPage() {
                       {/* Complete: a draft (open) rec can only be completed directly
                           when the routine does NOT require technical review; otherwise it
                           must go through review (via "All Recommendations Created"). */}
-                      {((rec.status === 'open' && !(visit.routine?.requires_technical_review ?? true)) || (rec.status === 'approved' && rec.review_decision !== 'request_sap')) && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
+                      {((rec.status === 'open' && !(requiresReviewFor(visit))) || (rec.status === 'approved' && rec.review_decision !== 'request_sap')) && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
                         <Button variant="ghost" size="sm" onClick={() => handleCompleteRecommendation(rec.id)} className="h-7 w-7 p-0" title="Mark complete">
                           <CheckCircle className="w-4 h-4 text-green-500" />
                         </Button>
@@ -1844,7 +1859,7 @@ export default function VisitDetailPage() {
                                 <Edit3 className="w-4 h-4" />
                               </Button>
                             )}
-                            {((rec.status === 'open' && !(visit.routine?.requires_technical_review ?? true)) || (rec.status === 'approved' && rec.review_decision !== 'request_sap')) && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
+                            {((rec.status === 'open' && !(requiresReviewFor(visit))) || (rec.status === 'approved' && rec.review_decision !== 'request_sap')) && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -1976,7 +1991,7 @@ export default function VisitDetailPage() {
           {error && <Alert variant="error">{error}</Alert>}
           {success && <Alert variant="success">{success}</Alert>}
 
-          {visit?.routine?.requires_technical_review && (
+          {requiresReviewFor(visit) && (
             <div className="bg-blue-50 p-3 rounded-lg text-sm text-blue-800">
               This recommendation will be sent to the Technical Engineer for review before SAP notification details can be added.
             </div>
@@ -1992,7 +2007,7 @@ export default function VisitDetailPage() {
             rows={4}
           />
 
-          {!visit?.routine?.requires_technical_review && (
+          {!requiresReviewFor(visit) && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <Input
                 label="SAP Notification Number"
@@ -2017,7 +2032,7 @@ export default function VisitDetailPage() {
               Cancel
             </Button>
             <Button type="submit" loading={submitting} className="w-full sm:w-auto">
-              {visit?.routine?.requires_technical_review ? 'Send for Review' : 'Create'}
+              {requiresReviewFor(visit) ? 'Send for Review' : 'Create'}
             </Button>
           </div>
         </form>

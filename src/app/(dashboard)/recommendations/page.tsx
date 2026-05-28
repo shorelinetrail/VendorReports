@@ -21,11 +21,14 @@ interface RecommendationWithDetails extends Omit<Recommendation, 'visit' | 'crea
   visit: {
     id: string;
     scheduled_date: string;
+    is_adhoc: boolean;
+    adhoc_description: string | null;
     routine: {
       plan_number: string;
       description: string;
       vendor: { name: string };
-    };
+    } | null;
+    vendor: { name: string } | null;
   };
   created_by: { full_name: string };
   reviewed_by?: { full_name: string } | null;
@@ -61,11 +64,14 @@ export default function RecommendationsPage() {
           visit:maintenance_visits(
             id,
             scheduled_date,
+            is_adhoc,
+            adhoc_description,
             routine:maintenance_routines(
               plan_number,
               description,
               vendor:vendors(name)
-            )
+            ),
+            vendor:vendors!maintenance_visits_vendor_id_fkey(name)
           ),
           created_by:users!recommendations_created_by_id_fkey(full_name),
           reviewed_by:users!recommendations_reviewed_by_id_fkey(full_name)
@@ -413,11 +419,11 @@ export default function RecommendationsPage() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <span className="text-primary-600">{rec.visit?.routine?.plan_number}</span>
-                    {rec.visit?.routine?.description && (
-                      <p className="text-xs text-gray-500 whitespace-normal max-w-xs">{rec.visit.routine.description}</p>
+                    <span className="text-primary-600">{rec.visit?.routine?.plan_number || (rec.visit?.is_adhoc ? 'Breakdown' : '-')}</span>
+                    {(rec.visit?.routine?.description || rec.visit?.adhoc_description) && (
+                      <p className="text-xs text-gray-500 whitespace-normal max-w-xs">{rec.visit?.routine?.description || rec.visit?.adhoc_description}</p>
                     )}
-                    <p className="text-sm text-gray-500">{rec.visit?.routine?.vendor?.name}</p>
+                    <p className="text-sm text-gray-500">{rec.visit?.routine?.vendor?.name || rec.visit?.vendor?.name}</p>
                   </TableCell>
                   <TableCell>{rec.sap_notification_number || '-'}</TableCell>
                   <TableCell>

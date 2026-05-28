@@ -22,11 +22,14 @@ interface MaintenanceReport {
     id: string;
     scheduled_date: string;
     status: string;
+    is_adhoc: boolean;
+    adhoc_description: string | null;
     routine: {
       plan_number: string;
       description: string;
       vendor: { name: string };
-    };
+    } | null;
+    vendor: { name: string } | null;
   } | null;
   uploaded_by: { full_name: string } | null;
 }
@@ -69,11 +72,14 @@ export default function MaintenanceReportsPage() {
             id,
             scheduled_date,
             status,
+            is_adhoc,
+            adhoc_description,
             routine:maintenance_routines(
               plan_number,
               description,
               vendor:vendors(name)
-            )
+            ),
+            vendor:vendors!maintenance_visits_vendor_id_fkey(name)
           ),
           uploaded_by:users!visit_reports_uploaded_by_id_fkey(full_name)
         `)
@@ -83,7 +89,7 @@ export default function MaintenanceReportsPage() {
       setReports(reportsData);
 
       // Extract unique vendors
-      const uniqueVendors = [...new Set(reportsData.map(r => r.visit?.routine?.vendor?.name).filter(Boolean))];
+      const uniqueVendors = [...new Set(reportsData.map(r => r.visit?.routine?.vendor?.name || r.visit?.vendor?.name).filter(Boolean))];
       setVendors(uniqueVendors as string[]);
     } catch (err) {
       console.error('Error fetching reports:', err);
@@ -100,15 +106,15 @@ export default function MaintenanceReportsPage() {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(r =>
         r.visit?.routine?.plan_number?.toLowerCase().includes(term) ||
-        r.visit?.routine?.description?.toLowerCase().includes(term) ||
-        r.visit?.routine?.vendor?.name?.toLowerCase().includes(term) ||
+        (r.visit?.routine?.description || r.visit?.adhoc_description)?.toLowerCase().includes(term) ||
+        (r.visit?.routine?.vendor?.name || r.visit?.vendor?.name)?.toLowerCase().includes(term) ||
         r.file_name?.toLowerCase().includes(term)
       );
     }
 
     // Apply vendor filter
     if (vendorFilter !== 'all') {
-      filtered = filtered.filter(r => r.visit?.routine?.vendor?.name === vendorFilter);
+      filtered = filtered.filter(r => (r.visit?.routine?.vendor?.name || r.visit?.vendor?.name) === vendorFilter);
     }
 
     // Apply status filter
@@ -131,12 +137,12 @@ export default function MaintenanceReportsPage() {
           valueB = b.uploaded_at;
           break;
         case 'plan_number':
-          valueA = a.visit?.routine?.plan_number || '';
-          valueB = b.visit?.routine?.plan_number || '';
+          valueA = a.visit?.routine?.plan_number || (a.visit?.is_adhoc ? 'Breakdown' : '');
+          valueB = b.visit?.routine?.plan_number || (b.visit?.is_adhoc ? 'Breakdown' : '');
           break;
         case 'vendor':
-          valueA = a.visit?.routine?.vendor?.name || '';
-          valueB = b.visit?.routine?.vendor?.name || '';
+          valueA = a.visit?.routine?.vendor?.name || a.visit?.vendor?.name || '';
+          valueB = b.visit?.routine?.vendor?.name || b.visit?.vendor?.name || '';
           break;
       }
 
@@ -316,13 +322,13 @@ export default function MaintenanceReportsPage() {
             filteredReports.map((report) => (
               <TableRow key={report.id} onClick={() => report.visit?.id && router.push(`/visits/${report.visit.id}`)}>
                 <TableCell className="font-medium">
-                  <span className="text-primary-600">{report.visit?.routine?.plan_number}</span>
-                  {report.visit?.routine?.description && (
-                    <p className="text-xs text-gray-500 font-normal whitespace-normal max-w-xs">{report.visit.routine.description}</p>
+                  <span className="text-primary-600">{report.visit?.routine?.plan_number || (report.visit?.is_adhoc ? 'Breakdown' : '-')}</span>
+                  {(report.visit?.routine?.description || report.visit?.adhoc_description) && (
+                    <p className="text-xs text-gray-500 font-normal whitespace-normal max-w-xs">{report.visit?.routine?.description || report.visit?.adhoc_description}</p>
                   )}
                 </TableCell>
                 <TableCell className="max-w-xs truncate">{report.file_name}</TableCell>
-                <TableCell>{report.visit?.routine?.vendor?.name}</TableCell>
+                <TableCell>{report.visit?.routine?.vendor?.name || report.visit?.vendor?.name || '-'}</TableCell>
                 <TableCell>
                   {report.visit?.scheduled_date
                     ? format(new Date(report.visit.scheduled_date), 'MMM d, yyyy')
