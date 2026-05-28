@@ -150,9 +150,8 @@ For a **no-recommendations** declaration the technical engineer instead uses
 *Close Visit* (`handleCloseVisit`) is enabled for the maintenance engineer/admin once: a
 report (or no-report reason) exists, the phase has been **finalised**
 (`recommendations_complete`), every recommendation is resolved, and — for a no-recs
-declaration under review — the technical engineer has approved. It sets visit → `completed`
-and sweeps any remaining open workflow tasks to completed. Admins can *Reopen* a completed
-visit (`handleReopenVisit`).
+declaration under review — the technical engineer has approved. It sets visit → `completed`,
+stamps `completed_at`, and sweeps any remaining open workflow tasks to completed.
 
 ### Side transitions
 - **Reschedule** (`handleRescheduleVisit`): allowed only while `scheduled`/`date_confirmed`
@@ -161,12 +160,30 @@ visit (`handleReopenVisit`).
   date across repeated reschedules, cancels the old confirm task and creates a fresh one.
 - **Reassign team** (admin only, `handleReassignTeam`): swaps the three assigned users on
   the visit. Does **not** reassign existing open tasks to the new people (open gap #9).
+- **Forward** (`handleForwardRecommendations`): the maintenance engineer hands the
+  create-recommendations step to another engineer with a comment. Because the scoped RLS
+  policy forbids removing yourself from a visit, this runs through the server route
+  **`/api/visits/forward`** (service role), which verifies the caller is the current
+  maintenance engineer or an admin before reassigning the engineer and their task.
 - **Report upload** is permitted for any assigned team member (coordinator, maintenance or
-  technical engineer) or admin; only the coordinator is assigned an upload task.
+  technical engineer) or admin; only the coordinator is assigned an upload task. Uploading a
+  report to a visit previously marked "no report available" clears `no_report_reason`.
+- **Cancel** (admin, `handleCancelVisit` on the detail and list pages): sets status →
+  `cancelled` with a reason and `cancelled_at`, and cancels any open tasks. This replaces the
+  old destructive visit delete.
+- **Reopen** (admin, `handleReopenVisit`): available for `completed` **or** `cancelled`
+  visits. Clears `completed_at`/cancellation fields, resets the recommendation-phase decision
+  (`recommendations_complete`, `no_recommendations_*`), and recomputes status from the
+  visit's data so the engineer can act again.
+
+The **"Waiting for …" banner** under the stepper is derived from status + recommendation
+state and names the responsible party and their next action (e.g. coordinator to confirm,
+technical engineer to review/approve, maintenance engineer to finalise/complete/close); for a
+finalised visit with nothing left to action it reads simply "to close the visit".
 
 An **activity log** is reconstructed on the client (`activities` memo) by stitching together
-timestamps across the visit, reports, recommendations, and completed tasks. (The durable,
-queryable history now lives in `audit_log`.)
+timestamps across the visit, reports, recommendations, the no-recommendations decision, the
+cancellation, and completed tasks. (The durable, queryable history now lives in `audit_log`.)
 
 ---
 
@@ -180,9 +197,10 @@ queryable history now lives in `audit_log`.)
   `technical_review` (raised on **finalise**, per recommendation or once for a no-recs
   declaration, when review is required) → `close_visit` (when the last recommendation
   resolves / a no-recs declaration is approved). Each step completes its predecessor.
-- The **My Tasks** page is read-only: there are no manual start/complete buttons. A task
-  clears only when its underlying workflow step is actually performed on the visit, so a task
-  can't be dismissed without the work being done. (As a result `in_progress` is now unused.)
+- The **My Tasks** page is read-only: there are no manual start/complete buttons (and no
+  "In Progress" card/filter). A task clears only when its underlying workflow step is actually
+  performed on the visit, so a task can't be dismissed without the work being done. Rows are
+  click-through to the visit; the routine description is shown for identification.
 - **Overdue** is both shown client-side and **persisted**: a second daily cron
   (`/api/tasks/expire`, 07:00 UTC) flips past-due `pending`/`in_progress` tasks to the
   `overdue` status. Visit handlers complete tasks regardless of `overdue` state, and closing
@@ -198,9 +216,11 @@ queryable history now lives in `audit_log`.)
   skipped by the generator and can be reactivated.
 - **Recommendations** (`recommendations/page.tsx`) — cross-visit aggregate view with status
   filtering; review/complete/cancel actions are available here as well as on the visit page.
-- **Dashboard** (`dashboard/page.tsx`) — stat cards (including a now-computed "Completed This
-  Month"), a 3-month interactive calendar of visits colored by status, upcoming visits (next
-  30 days), and the user's pending tasks.
+- **Dashboard** (`dashboard/page.tsx`) — stat cards ("Completed This Month" is counted from
+  the visit `completed_at` timestamp), a 3-month interactive calendar of visits colored by
+  status, upcoming visits (next 30 days), and the user's pending tasks.
+- **Visits** (`visits/page.tsx`) — list with click-through rows and the routine description.
+  Admins **Cancel** in-flight visits (soft) rather than deleting them.
 - **Analytics** (`reports/page.tsx`) — monthly trend, status distribution, vendor
   performance charts; CSV export of summary + vendor breakdown; 3/6/12-month range.
 - **Maintenance Reports** (`reports/maintenance/page.tsx`) — enumerates **every**
@@ -389,6 +409,32 @@ recommendation phase plus several UX changes:
 
 ---
 
-*Originally generated 2026-05-28; updated to reflect migrations 008–019, the lifecycle fixes,
-and the recommendation-phase finalisation flow. Inline line numbers were removed as the files
-have since changed; handler names are stable references.*
+## 9. Scenario-review fixes (round 2)
+
+A full scenario walk-through surfaced further issues, fixed in migration 020 + UI work
+(everything except the known reassign-tasks gap #6):
+
+- **Forward works for the maintenance engineer**, not just admins — routed through
+  `/api/visits/forward` (service role) since the scoped RLS `WITH CHECK` forbids removing
+  yourself from a visit.
+- **Reopen** no longer leaves a "no recommendations required" visit stuck: it resets the
+  recommendation-phase flags, clears `completed_at`/cancellation fields, recomputes status,
+  and now also applies to `cancelled` visits.
+- **"No report available" is reversible** — a report can still be uploaded afterwards (clears
+  `no_report_reason`).
+- **Adding a draft during review** no longer regresses an `in_review` visit; finalisation is
+  available regardless of status, and the banner flags unsent drafts.
+- **Cancel visit** (admin) replaces the destructive cascade delete; `cancelled_at` /
+  `cancellation_reason` added in migration 020.
+- **"Completed This Month"** is counted from a real `completed_at` (migration 020), set on
+  close and cleared on reopen.
+- **Concurrency guards** — status preconditions on close/cancel/approve/reject so a stale or
+  duplicate action no-ops instead of clobbering (targeted, not full optimistic locking).
+- Removed the unreachable **"In Progress"** task card/filter; tables are click-through with
+  the routine description shown.
+
+---
+
+*Originally generated 2026-05-28; updated to reflect migrations 008–020, the lifecycle fixes,
+the recommendation-phase finalisation flow, and the round-2 scenario fixes. Inline line
+numbers were removed as the files have since changed; handler names are stable references.*
