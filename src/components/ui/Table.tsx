@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode } from 'react';
+import { ReactNode, MouseEvent } from 'react';
 
 interface TableProps {
   children: ReactNode;
@@ -33,9 +33,15 @@ export function TableBody({ children, className = '' }: TableProps) {
   );
 }
 
-export function TableRow({ children, className = '' }: TableProps) {
+interface TableRowProps {
+  children: ReactNode;
+  className?: string;
+  onClick?: () => void;
+}
+
+export function TableRow({ children, className = '', onClick }: TableRowProps) {
   return (
-    <tr className={`hover:bg-gray-50 ${className}`}>
+    <tr className={`hover:bg-gray-50 ${onClick ? 'cursor-pointer' : ''} ${className}`} onClick={onClick}>
       {children}
     </tr>
   );
@@ -66,9 +72,10 @@ interface TableCellProps {
   className?: string;
   align?: 'left' | 'center' | 'right';
   colSpan?: number;
+  onClick?: (e: MouseEvent) => void;
 }
 
-export function TableCell({ children, className = '', align = 'left', colSpan }: TableCellProps) {
+export function TableCell({ children, className = '', align = 'left', colSpan, onClick }: TableCellProps) {
   const alignClass = {
     left: 'text-left',
     center: 'text-center',
@@ -76,7 +83,7 @@ export function TableCell({ children, className = '', align = 'left', colSpan }:
   };
 
   return (
-    <td colSpan={colSpan} className={`px-6 py-4 whitespace-nowrap text-sm text-gray-900 ${alignClass[align]} ${className}`}>
+    <td colSpan={colSpan} onClick={onClick} className={`px-6 py-4 whitespace-nowrap text-sm text-gray-900 ${alignClass[align]} ${className}`}>
       {children}
     </td>
   );

@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { CheckCircle, Clock, AlertTriangle, Eye } from 'lucide-react';
 import { format, isBefore, isToday, addDays } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Task, TaskStatus, TaskType } from '@/types/database';
+import { Task, TaskType } from '@/types/database';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
 import Select from '@/components/ui/Select';
@@ -29,6 +30,7 @@ interface TaskWithDetails extends Omit<Task, 'visit' | 'assigned_to'> {
 }
 
 export default function TasksPage() {
+  const router = useRouter();
   const { userProfile, hasRole, loading: authLoading } = useAuth();
   const [tasks, setTasks] = useState<TaskWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,38 +88,9 @@ export default function TasksPage() {
     }
   };
 
-  const handleCompleteTask = async (taskId: string) => {
-    try {
-      const { error } = await supabase
-        .from('tasks')
-        .update({
-          status: 'completed' as TaskStatus,
-          completed_at: new Date().toISOString(),
-        })
-        .eq('id', taskId);
-
-      if (error) throw error;
-      await fetchTasks();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'An error occurred';
-      alert(message);
-    }
-  };
-
-  const handleStartTask = async (taskId: string) => {
-    try {
-      const { error } = await supabase
-        .from('tasks')
-        .update({ status: 'in_progress' as TaskStatus })
-        .eq('id', taskId);
-
-      if (error) throw error;
-      await fetchTasks();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'An error occurred';
-      alert(message);
-    }
-  };
+  // Tasks are completed automatically when their underlying workflow step is
+  // performed on the visit (confirming a date, uploading a report, creating
+  // recommendations, etc.) — they cannot be dismissed manually from here.
 
   const formatTaskType = (type: TaskType): string => {
     const labels: Record<TaskType, string> = {
@@ -310,7 +283,7 @@ export default function TasksPage() {
             filteredTasks.map((task) => {
               const statusInfo = getStatusInfo(task);
               return (
-                <TableRow key={task.id}>
+                <TableRow key={task.id} onClick={() => task.visit?.id && router.push(`/visits/${task.visit.id}`)}>
                   <TableCell>
                     <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${getTaskTypeColor(task.task_type)}`}>
                       {formatTaskType(task.task_type)}
@@ -318,6 +291,9 @@ export default function TasksPage() {
                   </TableCell>
                   <TableCell>
                     <p className="font-medium">{task.visit?.routine?.plan_number}</p>
+                    {task.visit?.routine?.description && (
+                      <p className="text-xs text-gray-500 whitespace-normal max-w-xs">{task.visit.routine.description}</p>
+                    )}
                     <p className="text-sm text-gray-500">{task.visit?.routine?.vendor?.name}</p>
                   </TableCell>
                   {showAllUsers && (
@@ -331,33 +307,13 @@ export default function TasksPage() {
                   <TableCell>
                     <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
                   </TableCell>
-                  <TableCell align="right">
+                  <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-end space-x-2">
                       <Link href={`/visits/${task.visit?.id}`}>
-                        <Button variant="ghost" size="sm" title="View Visit">
+                        <Button variant="ghost" size="sm" title="Open visit to action this task">
                           <Eye className="w-4 h-4" />
                         </Button>
                       </Link>
-                      {(task.status === 'pending' || task.status === 'overdue') && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleStartTask(task.id)}
-                          title="Start Task"
-                        >
-                          <Clock className="w-4 h-4 text-blue-500" />
-                        </Button>
-                      )}
-                      {(task.status === 'pending' || task.status === 'in_progress' || task.status === 'overdue') && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleCompleteTask(task.id)}
-                          title="Complete Task"
-                        >
-                          <CheckCircle className="w-4 h-4 text-green-500" />
-                        </Button>
-                      )}
                     </div>
                   </TableCell>
                 </TableRow>

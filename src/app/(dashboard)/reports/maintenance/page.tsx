@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Download, FileText, Search, SortAsc, SortDesc, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
@@ -34,6 +35,7 @@ type SortField = 'scheduled_date' | 'uploaded_at' | 'plan_number' | 'vendor';
 type SortOrder = 'asc' | 'desc';
 
 export default function MaintenanceReportsPage() {
+  const router = useRouter();
   const [reports, setReports] = useState<MaintenanceReport[]>([]);
   const [filteredReports, setFilteredReports] = useState<MaintenanceReport[]>([]);
   const [loading, setLoading] = useState(true);
@@ -312,11 +314,12 @@ export default function MaintenanceReportsPage() {
             </TableRow>
           ) : (
             filteredReports.map((report) => (
-              <TableRow key={report.id}>
+              <TableRow key={report.id} onClick={() => report.visit?.id && router.push(`/visits/${report.visit.id}`)}>
                 <TableCell className="font-medium">
-                  <Link href={`/visits/${report.visit?.id}`} className="text-primary-600 hover:underline">
-                    {report.visit?.routine?.plan_number}
-                  </Link>
+                  <span className="text-primary-600">{report.visit?.routine?.plan_number}</span>
+                  {report.visit?.routine?.description && (
+                    <p className="text-xs text-gray-500 font-normal whitespace-normal max-w-xs">{report.visit.routine.description}</p>
+                  )}
                 </TableCell>
                 <TableCell className="max-w-xs truncate">{report.file_name}</TableCell>
                 <TableCell>{report.visit?.routine?.vendor?.name}</TableCell>
@@ -336,7 +339,7 @@ export default function MaintenanceReportsPage() {
                     {(report.visit?.status || '').replace(/_/g, ' ')}
                   </Badge>
                 </TableCell>
-                <TableCell align="right">
+                <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center justify-end space-x-2">
                     <Link href={`/visits/${report.visit?.id}`}>
                       <Button variant="ghost" size="sm" title="View Visit">

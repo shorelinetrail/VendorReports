@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Plus, Upload, Eye, CheckCircle, Trash2 } from 'lucide-react';
 import { format, addMonths, isBefore } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
@@ -27,6 +28,7 @@ interface VisitWithDetails extends Omit<MaintenanceVisit, 'routine' | 'vendor_co
 }
 
 export default function VisitsPage() {
+  const router = useRouter();
   const { userProfile, hasRole } = useAuth();
   const [visits, setVisits] = useState<VisitWithDetails[]>([]);
   const [routines, setRoutines] = useState<MaintenanceRoutine[]>([]);
@@ -341,11 +343,12 @@ export default function VisitsPage() {
             </TableRow>
           ) : (
             filteredVisits.map((visit) => (
-              <TableRow key={visit.id}>
+              <TableRow key={visit.id} onClick={() => router.push(`/visits/${visit.id}`)}>
                 <TableCell className="font-medium">
-                  <Link href={`/visits/${visit.id}`} className="text-primary-600 hover:underline">
-                    {visit.routine?.plan_number}
-                  </Link>
+                  <span className="text-primary-600">{visit.routine?.plan_number}</span>
+                  {visit.routine?.description && (
+                    <p className="text-xs text-gray-500 font-normal whitespace-normal max-w-xs">{visit.routine.description}</p>
+                  )}
                 </TableCell>
                 <TableCell>{visit.routine?.vendor?.name}</TableCell>
                 <TableCell>{format(new Date(visit.scheduled_date), 'MMM d, yyyy')}</TableCell>
@@ -360,7 +363,7 @@ export default function VisitsPage() {
                     {visit.status.replace(/_/g, ' ')}
                   </Badge>
                 </TableCell>
-                <TableCell align="right">
+                <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center justify-end space-x-2">
                     <Link href={`/visits/${visit.id}`}>
                       <Button variant="ghost" size="sm">
@@ -377,7 +380,7 @@ export default function VisitsPage() {
                         <CheckCircle className="w-4 h-4 text-green-500" />
                       </Button>
                     )}
-                    {visit.status === 'date_confirmed' && (userProfile?.id === visit.vendor_coordinator_id || hasRole('admin')) && (
+                    {visit.status === 'date_confirmed' && (userProfile?.id === visit.vendor_coordinator_id || userProfile?.id === visit.maintenance_engineer_id || userProfile?.id === visit.technical_engineer_id || hasRole('admin')) && (
                       <Button
                         variant="ghost"
                         size="sm"

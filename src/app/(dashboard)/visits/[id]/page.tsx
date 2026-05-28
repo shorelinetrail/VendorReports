@@ -51,6 +51,10 @@ interface VisitReportWithUploader extends Omit<VisitReport, 'uploaded_by' | 'vis
   uploaded_by: { full_name: string };
 }
 
+interface TaskWithAssignee extends Omit<Task, 'assigned_to' | 'visit'> {
+  assigned_to?: { full_name: string } | null;
+}
+
 export default function VisitDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -58,7 +62,7 @@ export default function VisitDetailPage() {
   const [visit, setVisit] = useState<VisitDetails | null>(null);
   const [recommendations, setRecommendations] = useState<RecommendationWithCreator[]>([]);
   const [visitReports, setVisitReports] = useState<VisitReportWithUploader[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasks, setTasks] = useState<TaskWithAssignee[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [recommendationModalOpen, setRecommendationModalOpen] = useState(false);
@@ -154,7 +158,7 @@ export default function VisitDetailPage() {
           .order('created_at', { ascending: false }),
         supabase
           .from('tasks')
-          .select('*')
+          .select('*, assigned_to:users!tasks_assigned_to_id_fkey(full_name)')
           .eq('visit_id', visitId)
           .order('due_date', { ascending: true }),
         supabase
@@ -175,7 +179,7 @@ export default function VisitDetailPage() {
 
       if (visitRes.data) setVisit(visitRes.data as unknown as VisitDetails);
       if (recommendationsRes.data) setRecommendations(recommendationsRes.data as unknown as RecommendationWithCreator[]);
-      if (tasksRes.data) setTasks(tasksRes.data);
+      if (tasksRes.data) setTasks(tasksRes.data as unknown as TaskWithAssignee[]);
       if (reportsRes.data) setVisitReports(reportsRes.data as unknown as VisitReportWithUploader[]);
     } catch (err) {
       console.error('Error fetching visit data:', err);
@@ -968,7 +972,9 @@ export default function VisitDetailPage() {
 
     return {
       canConfirmDate: isVendorCoord || isAdmin,
-      canUploadReport: (isVendorCoord || isAdmin) && (visit.status === 'date_confirmed' || (visitReports.length > 0 && isNotClosed)),
+      // Any assigned team member (coordinator, maintenance/technical engineer)
+      // or an admin may upload a report; engineers just aren't assigned a task.
+      canUploadReport: (isVendorCoord || isMaintEng || isTechEng || isAdmin) && (visit.status === 'date_confirmed' || (visitReports.length > 0 && isNotClosed)),
       hasReports: _hasReports,
       canCreateRecommendation: (isMaintEng || isAdmin) && _hasReports && isNotClosed,
       canReview: isTechEng || isAdmin,
@@ -985,7 +991,10 @@ export default function VisitDetailPage() {
   const activities = useMemo(() => {
     if (!visit) return [];
 
-    const items: { date: string; event: string; details?: string }[] = [];
+    const items: { date: string; event: string; details?: string; by?: string }[] = [];
+
+    const coordinatorName = visit.vendor_coordinator?.full_name;
+    const engineerName = visit.maintenance_engineer?.full_name;
 
     // Visit created
     if (visit.created_at) {
@@ -1003,6 +1012,7 @@ export default function VisitDetailPage() {
         date: visit.confirmed_at || visit.updated_at,
         event: 'Visit date confirmed',
         details: `Confirmed for ${format(new Date(visit.confirmed_date), 'MMM d, yyyy')}`,
+        by: coordinatorName,
       });
     }
 
@@ -1012,20 +1022,19 @@ export default function VisitDetailPage() {
       if (visit.reschedule_reason) {
         details += `. ${visit.reschedule_reason}`;
       }
-      items.push({ date: visit.rescheduled_at, event: 'Visit rescheduled', details });
+      items.push({ date: visit.rescheduled_at, event: 'Visit rescheduled', details, by: coordinatorName });
     }
 
     // Reports uploaded
     visitReports.forEach(report => {
       let details = report.file_name;
-      if (report.uploaded_by?.full_name) details += ` (${report.uploaded_by.full_name})`;
       if (report.notes) details += `. ${report.notes}`;
-      items.push({ date: report.uploaded_at, event: 'Report uploaded', details });
+      items.push({ date: report.uploaded_at, event: 'Report uploaded', details, by: report.uploaded_by?.full_name });
     });
 
     // No report reason
     if (visit.no_report_reason && visitReports.length === 0) {
-      items.push({ date: visit.updated_at, event: 'No report available', details: visit.no_report_reason });
+      items.push({ date: visit.updated_at, event: 'No report available', details: visit.no_report_reason, by: coordinatorName });
     }
 
     // Recommendations
@@ -1034,12 +1043,14 @@ export default function VisitDetailPage() {
         date: rec.created_at,
         event: 'Recommendation created',
         details: rec.description.substring(0, 80) + (rec.description.length > 80 ? '...' : ''),
+        by: rec.created_by?.full_name,
       });
       if (rec.reviewed_at) {
         items.push({
           date: rec.reviewed_at,
           event: 'Recommendation reviewed',
-          details: `By ${rec.reviewed_by?.full_name || 'Technical Engineer'}`,
+          details: rec.description.substring(0, 40) + (rec.description.length > 40 ? '...' : ''),
+          by: rec.reviewed_by?.full_name || 'Technical Engineer',
         });
       }
       if (rec.completed_at) {
@@ -1047,10 +1058,11 @@ export default function VisitDetailPage() {
           date: rec.completed_at,
           event: 'Recommendation completed',
           details: rec.description.substring(0, 40) + (rec.description.length > 40 ? '...' : ''),
+          by: engineerName,
         });
       }
       if (rec.cancelled_at) {
-        items.push({ date: rec.cancelled_at, event: 'Recommendation cancelled', details: rec.cancellation_reason || undefined });
+        items.push({ date: rec.cancelled_at, event: 'Recommendation cancelled', details: rec.cancellation_reason || undefined, by: engineerName });
       }
     });
 
@@ -1064,7 +1076,7 @@ export default function VisitDetailPage() {
       close_visit: 'Close visit task',
     };
     tasks.filter(t => t.completed_at).forEach(task => {
-      items.push({ date: task.completed_at!, event: `${taskLabels[task.task_type] || task.task_type} completed` });
+      items.push({ date: task.completed_at!, event: `${taskLabels[task.task_type] || task.task_type} completed`, by: task.assigned_to?.full_name });
     });
 
     // Sort by date descending
@@ -1335,11 +1347,13 @@ export default function VisitDetailPage() {
                   <span className="hidden sm:inline">Upload Report</span>
                   <span className="sm:hidden ml-1">Upload</span>
                 </Button>
-                <Button variant="secondary" onClick={() => setNoReportModalOpen(true)} size="sm" className="text-xs sm:text-sm">
-                  <FileX className="w-4 h-4 sm:mr-2" />
-                  <span className="hidden sm:inline">No Report Available</span>
-                  <span className="sm:hidden ml-1">No Report</span>
-                </Button>
+                {canConfirmDate && (
+                  <Button variant="secondary" onClick={() => setNoReportModalOpen(true)} size="sm" className="text-xs sm:text-sm">
+                    <FileX className="w-4 h-4 sm:mr-2" />
+                    <span className="hidden sm:inline">No Report Available</span>
+                    <span className="sm:hidden ml-1">No Report</span>
+                  </Button>
+                )}
               </>
             )}
             {canCreateRecommendation && (
@@ -1607,7 +1621,12 @@ export default function VisitDetailPage() {
                       <div className="absolute left-1.5 sm:left-2.5 w-3 h-3 bg-primary-500 rounded-full border-2 border-white" />
                       <div className="bg-gray-50 rounded-lg p-2 sm:p-3">
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2">
-                          <p className="font-medium text-gray-900 text-sm">{activity.event}</p>
+                          <p className="font-medium text-gray-900 text-sm">
+                            {activity.event}
+                            {activity.by && (
+                              <span className="font-normal text-gray-500"> · {activity.by}</span>
+                            )}
+                          </p>
                           <p className="text-[10px] sm:text-sm text-gray-500">
                             {format(new Date(activity.date), 'MMM d, h:mm a')}
                           </p>

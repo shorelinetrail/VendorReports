@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { CheckCircle, XCircle, Eye, FileText, AlertTriangle } from 'lucide-react';
 import { format, isBefore } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
@@ -31,6 +32,7 @@ interface RecommendationWithDetails extends Omit<Recommendation, 'visit' | 'crea
 }
 
 export default function RecommendationsPage() {
+  const router = useRouter();
   const { userProfile, hasRole } = useAuth();
   const [recommendations, setRecommendations] = useState<RecommendationWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
@@ -401,7 +403,7 @@ export default function RecommendationsPage() {
             filteredRecommendations.map((rec) => {
               const isOverdue = rec.due_date && isBefore(new Date(rec.due_date), new Date()) && rec.status !== 'completed' && rec.status !== 'cancelled';
               return (
-                <TableRow key={rec.id}>
+                <TableRow key={rec.id} onClick={() => rec.visit?.id && router.push(`/visits/${rec.visit.id}`)}>
                   <TableCell className="max-w-xs">
                     <p className="truncate font-medium">{rec.description}</p>
                     {rec.technical_review_response && (
@@ -411,9 +413,10 @@ export default function RecommendationsPage() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <Link href={`/visits/${rec.visit?.id}`} className="text-primary-600 hover:underline">
-                      {rec.visit?.routine?.plan_number}
-                    </Link>
+                    <span className="text-primary-600">{rec.visit?.routine?.plan_number}</span>
+                    {rec.visit?.routine?.description && (
+                      <p className="text-xs text-gray-500 whitespace-normal max-w-xs">{rec.visit.routine.description}</p>
+                    )}
                     <p className="text-sm text-gray-500">{rec.visit?.routine?.vendor?.name}</p>
                   </TableCell>
                   <TableCell>{rec.sap_notification_number || '-'}</TableCell>
@@ -432,7 +435,7 @@ export default function RecommendationsPage() {
                     </Badge>
                   </TableCell>
                   <TableCell>{rec.created_by?.full_name}</TableCell>
-                  <TableCell align="right">
+                  <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-end space-x-2">
                       <Link href={`/visits/${rec.visit?.id}`}>
                         <Button variant="ghost" size="sm" title="View Visit">
