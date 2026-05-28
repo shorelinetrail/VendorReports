@@ -64,6 +64,8 @@ scheduled → date_confirmed → report_uploaded → recommendations_created →
                                                                                      (or cancelled)
 ```
 
+Visits are usually generated from routines, but any team member can also raise a standalone **ad-hoc/breakdown** visit (no routine) via `src/app/api/visits/breakdown/route.ts`; such visits carry their own vendor/team/flag (`is_adhoc`, migration 021) and `routine_id` is nullable, so visit-reading UI falls back to the visit's own vendor/description when `routine` is null.
+
 Routines define recurring maintenance plans (interval + start date + a "call horizon" of months ahead to create visits). `src/app/api/visits/generate/route.ts` is the engine: it walks each active routine, projects scheduled dates from `start_date` out to the horizon, creates any missing `maintenance_visits`, and seeds the first `confirm_visit_date` task. It runs daily via the Vercel cron in `vercel.json` (06:00 UTC) and can be triggered manually by an admin.
 
 `tasks` are the per-step to-dos assigned to specific users with deadlines; deadline offsets are configurable per the `system_config` table (keys like `visit_confirmation_days`, `report_upload_days`, etc.). A second daily cron (`src/app/api/tasks/expire/route.ts`, 07:00 UTC) flips past-due `pending`/`in_progress` tasks to the `overdue` status. `recommendations` are action items raised from a visit's report and optionally routed through a technical-review sub-workflow (`requires_technical_review` on the routine, `review_decision` on the recommendation).

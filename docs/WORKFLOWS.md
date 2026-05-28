@@ -80,6 +80,9 @@ All transitions are driven from `src/app/(dashboard)/visits/[id]/page.tsx`. Each
 advances the per-visit **task chain** via the shared helpers in `src/lib/workflow/tasks.ts`
 (completing the current step's task and queuing the next).
 
+> **Ad-hoc / breakdown visits** (see §10) skip steps 0–1: they're created directly at
+> `date_confirmed` and have no routine.
+
 ### Step 0 — Visit generation (automated)
 `src/app/api/visits/generate/route.ts`, scheduled daily at 06:00 UTC via `vercel.json`.
 
@@ -435,6 +438,29 @@ A full scenario walk-through surfaced further issues, fixed in migration 020 + U
 
 ---
 
-*Originally generated 2026-05-28; updated to reflect migrations 008–020, the lifecycle fixes,
-the recommendation-phase finalisation flow, and the round-2 scenario fixes. Inline line
-numbers were removed as the files have since changed; handler names are stable references.*
+---
+
+## 10. Ad-hoc / breakdown visits
+
+Visits no longer have to come from a routine. Any signed-in team member (vendor coordinator,
+maintenance or technical engineer) or admin can raise a one-off **breakdown** visit via
+*Report Breakdown* on the Visits page.
+
+- **Standalone (migration 021).** `routine_id` is now nullable; the visit carries its own
+  `vendor_id`, the assigned team, `adhoc_description`, `adhoc_reason`, an `is_adhoc` flag, and
+  a per-visit `requires_technical_review` (routine visits still inherit review from the
+  routine — see `requiresReviewFor`).
+- **Creation** goes through **`/api/visits/breakdown`** (service role) so the initial
+  `upload_report` task can be assigned to the chosen coordinator regardless of who files it.
+  It starts at `date_confirmed` (the entered date is treated as confirmed), so it proceeds
+  straight to report upload and then the normal recommendation flow.
+- **Display.** Ad-hoc visits show a **Breakdown** badge throughout; everywhere a visit is
+  listed (visits list, detail, tasks, recommendations, maintenance reports, dashboard) falls
+  back to the visit's own vendor / `adhoc_description` when there is no routine.
+
+---
+
+*Originally generated 2026-05-28; updated to reflect migrations 008–021, the lifecycle fixes,
+the recommendation-phase finalisation flow, the round-2 scenario fixes, and ad-hoc/breakdown
+visits. Inline line numbers were removed as the files have since changed; handler names are
+stable references.*
