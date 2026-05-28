@@ -119,19 +119,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Update the user profile in the users table
-    // The trigger should have created a basic profile, now update with correct values
-    const { error: updateError } = await adminClient
+    // Create the user profile in the users table
+    const { error: insertError } = await adminClient
       .from('users')
-      .update({
+      .insert({
+        id: newUser.user.id,
+        email: newUser.user.email,
         full_name,
         role,
-      })
-      .eq('id', newUser.user.id);
+      });
 
-    if (updateError) {
-      console.warn('Could not update user profile:', updateError.message);
-      // User was created but profile update failed - not critical
+    if (insertError) {
+      console.error('Could not create user profile:', insertError.message);
+      // User was created in auth but profile insert failed
+      return NextResponse.json(
+        { error: 'User created but profile setup failed: ' + insertError.message },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({
