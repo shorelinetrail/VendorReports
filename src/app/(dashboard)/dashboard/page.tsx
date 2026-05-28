@@ -94,17 +94,26 @@ export default function DashboardPage() {
 
       setDataLoading(true);
       try {
+        const today = new Date();
+        const monthStart = startOfMonth(today).toISOString();
+        const monthEnd = endOfMonth(today).toISOString();
+
         // Fetch stats
-        const [routinesRes, visitsRes, tasksRes, recommendationsRes] = await Promise.all([
+        const [routinesRes, visitsRes, tasksRes, recommendationsRes, completedRes] = await Promise.all([
           supabase.from('maintenance_routines').select('id', { count: 'exact' }).eq('is_active', true),
           supabase.from('maintenance_visits').select('id', { count: 'exact' }).not('status', 'in', '("completed","cancelled")'),
-          supabase.from('tasks').select('id, status, due_date').eq('assigned_to_id', userProfile.id).in('status', ['pending', 'in_progress']),
+          supabase.from('tasks').select('id, status, due_date').eq('assigned_to_id', userProfile.id).in('status', ['pending', 'in_progress', 'overdue']),
           supabase.from('recommendations').select('id', { count: 'exact' }).eq('status', 'open'),
+          supabase
+            .from('maintenance_visits')
+            .select('id', { count: 'exact', head: true })
+            .eq('status', 'completed')
+            .gte('updated_at', monthStart)
+            .lte('updated_at', monthEnd),
         ]);
 
-        const today = new Date();
         const overdueTasks = tasksRes.data?.filter((t: { due_date: string; status: string }) =>
-          isBefore(new Date(t.due_date), today) && t.status !== 'completed'
+          t.status === 'overdue' || (isBefore(new Date(t.due_date), today) && t.status !== 'completed')
         ).length || 0;
 
         setStats({
@@ -113,7 +122,7 @@ export default function DashboardPage() {
           pendingTasks: tasksRes.data?.length || 0,
           overdueTasks,
           openRecommendations: recommendationsRes.count || 0,
-          completedThisMonth: 0,
+          completedThisMonth: completedRes.count || 0,
         });
 
         // Fetch upcoming visits
@@ -154,7 +163,7 @@ export default function DashboardPage() {
             )
           `)
           .eq('assigned_to_id', userProfile.id)
-          .in('status', ['pending', 'in_progress'])
+          .in('status', ['pending', 'in_progress', 'overdue'])
           .order('due_date', { ascending: true })
           .limit(5);
 

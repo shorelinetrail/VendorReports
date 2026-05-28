@@ -43,6 +43,12 @@ Next.js 15 App Router + Supabase (Postgres, Auth, Storage), deployed on Vercel. 
 
 The four roles are `admin`, `vendor_coordinator`, `maintenance_engineer`, `technical_engineer` (see `UserRole` in `src/types/database.ts`). The role-to-page mapping lives in the `navigation` array in `src/components/layout/Sidebar.tsx`.
 
+Public self-signup is **disabled** — `/signup` just redirects to `/login`. Accounts are created only by an admin through the Users page, which calls the service-role `src/app/api/users/route.ts`. RLS write policies are scoped to the assigned `*_id` columns on a visit (see migration 009), mirroring the per-visit checks the UI performs.
+
+Entities with history are **soft-deleted**: `users`, `vendors`, and `maintenance_routines` carry `is_active`, and the UI deactivates/reactivates rather than hard-deleting. Inactive users/vendors are excluded from assignment dropdowns.
+
+Every write to the core tables is recorded in an append-only `audit_log` table via DB triggers (migration 008); it captures the actor (`auth.uid()`, null for cron/service-role), action, and before/after row JSON. Only admins can read it, and UPDATE/DELETE on it are blocked.
+
 ### Routing layout
 
 - `src/app/(auth)/` — login/signup, public.
@@ -60,7 +66,7 @@ scheduled → date_confirmed → report_uploaded → recommendations_created →
 
 Routines define recurring maintenance plans (interval + start date + a "call horizon" of months ahead to create visits). `src/app/api/visits/generate/route.ts` is the engine: it walks each active routine, projects scheduled dates from `start_date` out to the horizon, creates any missing `maintenance_visits`, and seeds the first `confirm_visit_date` task. It runs daily via the Vercel cron in `vercel.json` (06:00 UTC) and can be triggered manually by an admin.
 
-`tasks` are the per-step to-dos assigned to specific users with deadlines; deadline offsets are configurable per the `system_config` table (keys like `visit_confirmation_days`, `report_upload_weeks`, etc.). `recommendations` are action items raised from a visit's report and optionally routed through a technical-review sub-workflow (`requires_technical_review` on the routine, `review_decision` on the recommendation).
+`tasks` are the per-step to-dos assigned to specific users with deadlines; deadline offsets are configurable per the `system_config` table (keys like `visit_confirmation_days`, `report_upload_weeks`, etc.). A second daily cron (`src/app/api/tasks/expire/route.ts`, 07:00 UTC) flips past-due `pending`/`in_progress` tasks to the `overdue` status. `recommendations` are action items raised from a visit's report and optionally routed through a technical-review sub-workflow (`requires_technical_review` on the routine, `review_decision` on the recommendation).
 
 `src/app/(dashboard)/visits/[id]/page.tsx` is the largest and most important UI — it renders the full visit detail and drives most status transitions, report uploads, and recommendation management.
 

@@ -188,6 +188,16 @@ tasks. It is *derived*, not a stored audit trail.
 Ordered roughly by impact. Items are marked **[verified in code]** where confirmed, or
 **[review]** where they depend on Supabase project configuration not visible in the repo.
 
+> **Status update.** Migrations 008–013 and the accompanying UI changes resolved most of
+> these: self-signup disabled & admin-only user creation (#1), RLS scoped to assigned IDs
+> (#2), append-only `audit_log` (#3), daily task auto-expiry via `/api/tasks/expire` (#4),
+> `close_visit` added to the enum (#6), "Completed This Month" now computed (#7), visit-date
+> entry moved to a modal (#8), legacy report columns dropped / multi-report fully on
+> `visit_reports` (#10), soft-delete for routines/users/vendors (#11), role-filtered
+> assignment dropdowns (#12), and config min/max validation in the form + a DB trigger (#13).
+> Still open: **#5 (notifications/email)** and **#9 (reassign does not move open tasks)**,
+> plus the configuration items #14/#15.
+
 ### Security / integrity
 
 1. **Self-assigned roles at signup [verified].** Anyone can register and choose

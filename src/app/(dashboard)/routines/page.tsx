@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, Eye, Upload, Download } from 'lucide-react';
+import { Plus, Pencil, Eye, Upload, Download, Archive, ArchiveRestore } from 'lucide-react';
 import { format, addMonths } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -199,43 +199,19 @@ export default function RoutinesPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this routine?\n\nThis will also delete all associated visits, tasks, and recommendations. This action cannot be undone.')) return;
+  // Archive (deactivate) a routine rather than destructively deleting it and
+  // its history. Inactive routines are skipped by the visit generator.
+  const handleToggleActive = async (routine: MaintenanceRoutine) => {
+    const deactivating = routine.is_active;
+    if (deactivating && !confirm('Archive this routine?\n\nIt will be marked inactive and no new visits will be generated for it. Existing visits, tasks, and recommendations are kept. You can reactivate it later.')) {
+      return;
+    }
 
     try {
-      // First get all visits for this routine
-      const { data: visits } = await supabase
-        .from('maintenance_visits')
-        .select('id')
-        .eq('routine_id', id);
-
-      if (visits && visits.length > 0) {
-        const visitIds = visits.map(v => v.id);
-
-        // Delete all recommendations for these visits
-        await supabase
-          .from('recommendations')
-          .delete()
-          .in('visit_id', visitIds);
-
-        // Delete all tasks for these visits
-        await supabase
-          .from('tasks')
-          .delete()
-          .in('visit_id', visitIds);
-
-        // Delete all visits for this routine
-        await supabase
-          .from('maintenance_visits')
-          .delete()
-          .eq('routine_id', id);
-      }
-
-      // Finally delete the routine
       const { error } = await supabase
         .from('maintenance_routines')
-        .delete()
-        .eq('id', id);
+        .update({ is_active: !routine.is_active })
+        .eq('id', routine.id);
 
       if (error) throw error;
       await fetchData();
@@ -247,7 +223,7 @@ export default function RoutinesPage() {
 
   const getUsersByRole = (role: string) => {
     return users
-      .filter((u) => u.role === role || u.role === 'admin')
+      .filter((u) => (u.role === role || u.role === 'admin') && u.is_active !== false)
       .map((u) => ({ value: u.id, label: u.full_name }));
   };
 
@@ -470,8 +446,17 @@ export default function RoutinesPage() {
                         <Button variant="ghost" size="sm" onClick={() => handleOpenModal(routine)}>
                           <Pencil className="w-4 h-4" />
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleDelete(routine.id)}>
-                          <Trash2 className="w-4 h-4 text-red-500" />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleToggleActive(routine)}
+                          title={routine.is_active ? 'Archive (deactivate)' : 'Reactivate'}
+                        >
+                          {routine.is_active ? (
+                            <Archive className="w-4 h-4 text-red-500" />
+                          ) : (
+                            <ArchiveRestore className="w-4 h-4 text-green-600" />
+                          )}
                         </Button>
                       </>
                     )}
@@ -510,7 +495,9 @@ export default function RoutinesPage() {
               value={formData.vendor_id}
               onChange={(e) => setFormData({ ...formData, vendor_id: e.target.value })}
               required
-              options={vendors.map((v) => ({ value: v.id, label: v.name }))}
+              options={vendors
+                .filter((v) => v.is_active !== false || v.id === formData.vendor_id)
+                .map((v) => ({ value: v.id, label: v.name }))}
               placeholder="Select vendor"
             />
           </div>

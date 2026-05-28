@@ -82,6 +82,16 @@ export default function SettingsPage() {
   const handleSave = async () => {
     setError(null);
     setSuccess(null);
+
+    // Validate: every value must be a whole number between 1 and 365.
+    for (const [key, value] of Object.entries(config)) {
+      const num = Number(value);
+      if (!/^\d+$/.test(value.trim()) || !Number.isInteger(num) || num < 1 || num > 365) {
+        setError(`${configLabels[key]} must be a whole number between 1 and 365.`);
+        return;
+      }
+    }
+
     setSaving(true);
 
     try {

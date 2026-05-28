@@ -71,6 +71,10 @@ export default function VisitDetailPage() {
   const [reviewAssignToId, setReviewAssignToId] = useState('');
   const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
   const [rescheduleData, setRescheduleData] = useState({ new_date: '', reason: '' });
+  const [confirmDateModalOpen, setConfirmDateModalOpen] = useState(false);
+  const [confirmDateValue, setConfirmDateValue] = useState('');
+  const [notificationModalOpen, setNotificationModalOpen] = useState(false);
+  const [notificationValue, setNotificationValue] = useState('');
   const [noReportModalOpen, setNoReportModalOpen] = useState(false);
   const [noReportReason, setNoReportReason] = useState('');
   const [reassignModalOpen, setReassignModalOpen] = useState(false);
@@ -175,15 +179,26 @@ export default function VisitDetailPage() {
     }
   };
 
-  const handleConfirmDate = async () => {
-    const confirmedDate = prompt('Enter confirmed visit date (YYYY-MM-DD):', visit?.scheduled_date);
-    if (!confirmedDate) return;
+  const openConfirmDateModal = () => {
+    setConfirmDateValue(visit?.confirmed_date || visit?.scheduled_date || '');
+    setError(null);
+    setSuccess(null);
+    setConfirmDateModalOpen(true);
+  };
+
+  const handleConfirmDate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!confirmDateValue) return;
+
+    setError(null);
+    setSuccess(null);
+    setSubmitting(true);
 
     try {
       const { error } = await supabase
         .from('maintenance_visits')
         .update({
-          confirmed_date: confirmedDate,
+          confirmed_date: confirmDateValue,
           confirmed_at: new Date().toISOString(),
           status: 'date_confirmed' as VisitStatus,
         })
@@ -191,9 +206,45 @@ export default function VisitDetailPage() {
 
       if (error) throw error;
       await fetchVisitData();
+      setConfirmDateModalOpen(false);
+      setSuccess('Visit date confirmed');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
-      alert(message);
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const openNotificationModal = () => {
+    setNotificationValue(visit?.notification_number || '');
+    setError(null);
+    setSuccess(null);
+    setNotificationModalOpen(true);
+  };
+
+  const handleSaveNotification = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    setError(null);
+    setSuccess(null);
+    setSubmitting(true);
+
+    try {
+      const { error } = await supabase
+        .from('maintenance_visits')
+        .update({ notification_number: notificationValue.trim() || null })
+        .eq('id', visitId);
+
+      if (error) throw error;
+      await fetchVisitData();
+      setNotificationModalOpen(false);
+      setSuccess('Notification number saved');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      setError(message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -230,15 +281,11 @@ export default function VisitDetailPage() {
 
       if (insertError) throw insertError;
 
-      // Also update maintenance_visits for backward compatibility (first report only)
-      if (visitReports.length === 0) {
+      // Advance the visit to report_uploaded if it was awaiting a report.
+      if (visit.status === 'date_confirmed') {
         const { error: updateError } = await supabase
           .from('maintenance_visits')
-          .update({
-            report_file_path: filePath,
-            report_uploaded_at: new Date().toISOString(),
-            status: 'report_uploaded' as VisitStatus,
-          })
+          .update({ status: 'report_uploaded' as VisitStatus })
           .eq('id', visitId);
 
         if (updateError) throw updateError;
@@ -302,15 +349,12 @@ export default function VisitDetailPage() {
 
       if (deleteError) throw deleteError;
 
-      // If this was the only/last report, update visit status and clear legacy fields
-      if (visitReports.length === 1 && visit) {
+      // If this was the only/last report and the visit hadn't progressed past
+      // report upload, roll the status back so a new report can be added.
+      if (visitReports.length === 1 && visit && visit.status === 'report_uploaded') {
         await supabase
           .from('maintenance_visits')
-          .update({
-            report_file_path: null,
-            report_uploaded_at: null,
-            status: 'date_confirmed' as VisitStatus,
-          })
+          .update({ status: 'date_confirmed' as VisitStatus })
           .eq('id', visitId);
       }
 
@@ -478,7 +522,7 @@ export default function VisitDetailPage() {
         .eq('visit_id', visitId)
         .eq('task_type', 'technical_review')
         .eq('assigned_to_id', userProfile.id)
-        .eq('status', 'pending');
+        .in('status', ['pending', 'in_progress', 'overdue']);
 
       await fetchVisitData();
       setReviewModalOpen(false);
@@ -608,7 +652,7 @@ export default function VisitDetailPage() {
           })
           .eq('visit_id', visitId)
           .eq('task_type', 'close_visit')
-          .in('status', ['pending', 'in_progress']);
+          .in('status', ['pending', 'in_progress', 'overdue']);
       }
 
       await fetchVisitData();
@@ -675,7 +719,7 @@ export default function VisitDetailPage() {
         .update({ status: 'cancelled' })
         .eq('visit_id', visitId)
         .eq('task_type', 'confirm_visit_date')
-        .in('status', ['pending', 'in_progress']);
+        .in('status', ['pending', 'in_progress', 'overdue']);
 
       // Create new confirm date task
       if (visit.vendor_coordinator_id) {
@@ -866,7 +910,7 @@ export default function VisitDetailPage() {
     const isTechEng = userProfile?.id === visit.technical_engineer_id;
     const isNotClosed = visit.status !== 'completed' && visit.status !== 'cancelled';
 
-    const _hasReports = visitReports.length > 0 || visit.report_file_path || visit.no_report_reason;
+    const _hasReports = visitReports.length > 0 || !!visit.no_report_reason;
     const allRecsDone = recommendations.length > 0 && recommendations.every(r => r.status === 'completed' || r.status === 'cancelled');
 
     return {
@@ -1111,7 +1155,19 @@ export default function VisitDetailPage() {
                 </p>
               </div>
               <div>
-                <p className="text-xs sm:text-sm text-gray-500">Notification Number</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-xs sm:text-sm text-gray-500">Notification Number</p>
+                  {canReschedule && (
+                    <button
+                      type="button"
+                      onClick={openNotificationModal}
+                      className="text-primary-600 hover:text-primary-700"
+                      title="Edit notification number"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
                 <p className="font-medium text-sm sm:text-base">{visit.notification_number || '-'}</p>
               </div>
               <div className="sm:col-span-2">
@@ -1210,7 +1266,7 @@ export default function VisitDetailPage() {
         <CardContent>
           <div className="flex flex-wrap gap-2 sm:gap-3">
             {visit.status === 'scheduled' && canConfirmDate && (
-              <Button onClick={handleConfirmDate} size="sm" className="text-xs sm:text-sm">
+              <Button onClick={openConfirmDateModal} size="sm" className="text-xs sm:text-sm">
                 <Calendar className="w-4 h-4 sm:mr-2" />
                 <span className="hidden sm:inline">Confirm Visit Date</span>
                 <span className="sm:hidden ml-1">Confirm</span>
@@ -1875,6 +1931,76 @@ export default function VisitDetailPage() {
             </Button>
             <Button type="submit" loading={submitting} className="w-full sm:w-auto">
               Save SAP Details
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Confirm Visit Date Modal */}
+      <Modal
+        isOpen={confirmDateModalOpen}
+        onClose={() => setConfirmDateModalOpen(false)}
+        title="Confirm Visit Date"
+      >
+        <form onSubmit={handleConfirmDate} className="space-y-4">
+          {error && <Alert variant="error">{error}</Alert>}
+          {success && <Alert variant="success">{success}</Alert>}
+
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <p className="text-sm text-gray-500">Scheduled Date</p>
+            <p className="font-medium">
+              {visit?.scheduled_date && format(new Date(visit.scheduled_date), 'MMMM d, yyyy')}
+            </p>
+          </div>
+
+          <Input
+            label="Confirmed Visit Date"
+            name="confirmed_date"
+            type="date"
+            value={confirmDateValue}
+            onChange={(e) => setConfirmDateValue(e.target.value)}
+            required
+          />
+
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 pt-4 border-t">
+            <Button type="button" variant="secondary" onClick={() => setConfirmDateModalOpen(false)} className="w-full sm:w-auto">
+              Cancel
+            </Button>
+            <Button type="submit" loading={submitting} disabled={!confirmDateValue} className="w-full sm:w-auto">
+              Confirm Date
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Notification Number Modal */}
+      <Modal
+        isOpen={notificationModalOpen}
+        onClose={() => setNotificationModalOpen(false)}
+        title="Edit Notification Number"
+      >
+        <form onSubmit={handleSaveNotification} className="space-y-4">
+          {error && <Alert variant="error">{error}</Alert>}
+          {success && <Alert variant="success">{success}</Alert>}
+
+          <p className="text-sm text-gray-600">
+            The notification number is unique to this visit (the maintenance plan covers all of its visits).
+          </p>
+
+          <Input
+            label="Notification Number"
+            name="notification_number"
+            value={notificationValue}
+            onChange={(e) => setNotificationValue(e.target.value)}
+            placeholder="e.g., NOT-2026-0042"
+          />
+
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 pt-4 border-t">
+            <Button type="button" variant="secondary" onClick={() => setNotificationModalOpen(false)} className="w-full sm:w-auto">
+              Cancel
+            </Button>
+            <Button type="submit" loading={submitting} className="w-full sm:w-auto">
+              Save
             </Button>
           </div>
         </form>

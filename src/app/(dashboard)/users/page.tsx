@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, Upload, Download } from 'lucide-react';
+import { Plus, Pencil, Upload, Download, UserX, UserCheck } from 'lucide-react';
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -151,24 +151,29 @@ export default function UsersPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (id === userProfile?.id) {
-      alert('You cannot delete your own account');
+  // Deactivate/reactivate a user instead of hard-deleting. Deactivated users
+  // are kept for history and excluded from assignment dropdowns.
+  const handleToggleActive = async (user: User) => {
+    if (user.id === userProfile?.id) {
+      alert('You cannot deactivate your own account');
       return;
     }
 
-    if (!confirm('Are you sure you want to delete this user?')) return;
+    const deactivating = user.is_active !== false;
+    if (deactivating && !confirm(`Deactivate ${user.full_name}?\n\nThey will no longer appear in assignment lists. Their history is preserved and they can be reactivated later.`)) {
+      return;
+    }
 
     try {
       const { error } = await supabase
         .from('users')
-        .delete()
-        .eq('id', id);
+        .update({ is_active: !(user.is_active !== false) })
+        .eq('id', user.id);
 
       if (error) throw error;
       await fetchUsers();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Cannot delete user - they may be assigned to routines or visits';
+      const message = err instanceof Error ? err.message : 'An error occurred';
       alert(message);
     }
   };
@@ -364,6 +369,7 @@ export default function UsersPage() {
             <TableHead>Name</TableHead>
             <TableHead>Email</TableHead>
             <TableHead>Role</TableHead>
+            <TableHead>Status</TableHead>
             <TableHead>Created</TableHead>
             {isAdmin && <TableHead align="right">Actions</TableHead>}
           </TableRow>
@@ -371,7 +377,7 @@ export default function UsersPage() {
         <TableBody>
           {users.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={isAdmin ? 5 : 4} className="text-center text-gray-500">
+              <TableCell colSpan={isAdmin ? 6 : 5} className="text-center text-gray-500">
                 No users found.
               </TableCell>
             </TableRow>
@@ -385,6 +391,11 @@ export default function UsersPage() {
                     {user.role.replace(/_/g, ' ')}
                   </Badge>
                 </TableCell>
+                <TableCell>
+                  <Badge variant={user.is_active !== false ? 'success' : 'cancelled'}>
+                    {user.is_active !== false ? 'Active' : 'Inactive'}
+                  </Badge>
+                </TableCell>
                 <TableCell>{format(new Date(user.created_at), 'MMM d, yyyy')}</TableCell>
                 {isAdmin && (
                   <TableCell align="right">
@@ -393,8 +404,17 @@ export default function UsersPage() {
                         <Pencil className="w-4 h-4" />
                       </Button>
                       {user.id !== userProfile?.id && (
-                        <Button variant="ghost" size="sm" onClick={() => handleDelete(user.id)}>
-                          <Trash2 className="w-4 h-4 text-red-500" />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleToggleActive(user)}
+                          title={user.is_active !== false ? 'Deactivate' : 'Reactivate'}
+                        >
+                          {user.is_active !== false ? (
+                            <UserX className="w-4 h-4 text-red-500" />
+                          ) : (
+                            <UserCheck className="w-4 h-4 text-green-600" />
+                          )}
                         </Button>
                       )}
                     </div>

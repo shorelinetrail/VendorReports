@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { Download, FileText, Search, SortAsc, SortDesc, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
@@ -15,31 +14,33 @@ import Link from 'next/link';
 
 interface MaintenanceReport {
   id: string;
-  scheduled_date: string;
-  confirmed_date: string | null;
-  status: string;
-  report_file_path: string | null;
-  report_uploaded_at: string | null;
-  routine: {
-    plan_number: string;
-    description: string;
-    vendor: { name: string };
-  };
-  vendor_coordinator: { full_name: string };
+  file_path: string;
+  file_name: string;
+  uploaded_at: string;
+  visit: {
+    id: string;
+    scheduled_date: string;
+    status: string;
+    routine: {
+      plan_number: string;
+      description: string;
+      vendor: { name: string };
+    };
+  } | null;
+  uploaded_by: { full_name: string } | null;
 }
 
-type SortField = 'scheduled_date' | 'report_uploaded_at' | 'plan_number' | 'vendor';
+type SortField = 'scheduled_date' | 'uploaded_at' | 'plan_number' | 'vendor';
 type SortOrder = 'asc' | 'desc';
 
 export default function MaintenanceReportsPage() {
-  const { hasRole } = useAuth();
   const [reports, setReports] = useState<MaintenanceReport[]>([]);
   const [filteredReports, setFilteredReports] = useState<MaintenanceReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [vendorFilter, setVendorFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [sortField, setSortField] = useState<SortField>('report_uploaded_at');
+  const [sortField, setSortField] = useState<SortField>('uploaded_at');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [vendors, setVendors] = useState<string[]>([]);
   const supabase = createClient();
@@ -56,29 +57,31 @@ export default function MaintenanceReportsPage() {
     setLoading(true);
     try {
       const { data } = await supabase
-        .from('maintenance_visits')
+        .from('visit_reports')
         .select(`
           id,
-          scheduled_date,
-          confirmed_date,
-          status,
-          report_file_path,
-          report_uploaded_at,
-          routine:maintenance_routines(
-            plan_number,
-            description,
-            vendor:vendors(name)
+          file_path,
+          file_name,
+          uploaded_at,
+          visit:maintenance_visits(
+            id,
+            scheduled_date,
+            status,
+            routine:maintenance_routines(
+              plan_number,
+              description,
+              vendor:vendors(name)
+            )
           ),
-          vendor_coordinator:users!maintenance_visits_vendor_coordinator_id_fkey(full_name)
+          uploaded_by:users!visit_reports_uploaded_by_id_fkey(full_name)
         `)
-        .not('report_file_path', 'is', null)
-        .order('report_uploaded_at', { ascending: false });
+        .order('uploaded_at', { ascending: false });
 
       const reportsData = (data || []) as unknown as MaintenanceReport[];
       setReports(reportsData);
 
       // Extract unique vendors
-      const uniqueVendors = [...new Set(reportsData.map(r => r.routine?.vendor?.name).filter(Boolean))];
+      const uniqueVendors = [...new Set(reportsData.map(r => r.visit?.routine?.vendor?.name).filter(Boolean))];
       setVendors(uniqueVendors as string[]);
     } catch (err) {
       console.error('Error fetching reports:', err);
@@ -94,20 +97,21 @@ export default function MaintenanceReportsPage() {
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(r =>
-        r.routine?.plan_number?.toLowerCase().includes(term) ||
-        r.routine?.description?.toLowerCase().includes(term) ||
-        r.routine?.vendor?.name?.toLowerCase().includes(term)
+        r.visit?.routine?.plan_number?.toLowerCase().includes(term) ||
+        r.visit?.routine?.description?.toLowerCase().includes(term) ||
+        r.visit?.routine?.vendor?.name?.toLowerCase().includes(term) ||
+        r.file_name?.toLowerCase().includes(term)
       );
     }
 
     // Apply vendor filter
     if (vendorFilter !== 'all') {
-      filtered = filtered.filter(r => r.routine?.vendor?.name === vendorFilter);
+      filtered = filtered.filter(r => r.visit?.routine?.vendor?.name === vendorFilter);
     }
 
     // Apply status filter
     if (statusFilter !== 'all') {
-      filtered = filtered.filter(r => r.status === statusFilter);
+      filtered = filtered.filter(r => r.visit?.status === statusFilter);
     }
 
     // Apply sorting
@@ -117,20 +121,20 @@ export default function MaintenanceReportsPage() {
 
       switch (sortField) {
         case 'scheduled_date':
-          valueA = a.scheduled_date;
-          valueB = b.scheduled_date;
+          valueA = a.visit?.scheduled_date || '';
+          valueB = b.visit?.scheduled_date || '';
           break;
-        case 'report_uploaded_at':
-          valueA = a.report_uploaded_at;
-          valueB = b.report_uploaded_at;
+        case 'uploaded_at':
+          valueA = a.uploaded_at;
+          valueB = b.uploaded_at;
           break;
         case 'plan_number':
-          valueA = a.routine?.plan_number || '';
-          valueB = b.routine?.plan_number || '';
+          valueA = a.visit?.routine?.plan_number || '';
+          valueB = b.visit?.routine?.plan_number || '';
           break;
         case 'vendor':
-          valueA = a.routine?.vendor?.name || '';
-          valueB = b.routine?.vendor?.name || '';
+          valueA = a.visit?.routine?.vendor?.name || '';
+          valueB = b.visit?.routine?.vendor?.name || '';
           break;
       }
 
@@ -146,19 +150,19 @@ export default function MaintenanceReportsPage() {
   };
 
   const handleDownload = async (report: MaintenanceReport) => {
-    if (!report.report_file_path) return;
+    if (!report.file_path) return;
 
     try {
       const { data, error } = await supabase.storage
         .from('reports')
-        .download(report.report_file_path);
+        .download(report.file_path);
 
       if (error) throw error;
 
       const url = URL.createObjectURL(data);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${report.routine?.plan_number || 'report'}-${format(new Date(report.scheduled_date), 'yyyy-MM-dd')}.${report.report_file_path.split('.').pop()}`;
+      a.download = report.file_name || report.file_path.split('/').pop() || 'report';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -230,7 +234,7 @@ export default function MaintenanceReportsPage() {
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
-                placeholder="Search by plan, description, or vendor..."
+                placeholder="Search by plan, description, vendor, or file..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10"
@@ -268,6 +272,7 @@ export default function MaintenanceReportsPage() {
                 Plan Number <SortIcon field="plan_number" />
               </span>
             </TableHead>
+            <TableHead>File</TableHead>
             <TableHead>
               <span
                 className="cursor-pointer hover:text-primary-600"
@@ -287,9 +292,9 @@ export default function MaintenanceReportsPage() {
             <TableHead>
               <span
                 className="cursor-pointer hover:text-primary-600"
-                onClick={() => toggleSort('report_uploaded_at')}
+                onClick={() => toggleSort('uploaded_at')}
               >
-                Uploaded <SortIcon field="report_uploaded_at" />
+                Uploaded <SortIcon field="uploaded_at" />
               </span>
             </TableHead>
             <TableHead>Uploaded By</TableHead>
@@ -300,7 +305,7 @@ export default function MaintenanceReportsPage() {
         <TableBody>
           {filteredReports.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={7} className="text-center text-gray-500 py-8">
+              <TableCell colSpan={8} className="text-center text-gray-500 py-8">
                 <FileText className="w-12 h-12 mx-auto text-gray-300 mb-2" />
                 No maintenance reports found matching your filters.
               </TableCell>
@@ -309,28 +314,31 @@ export default function MaintenanceReportsPage() {
             filteredReports.map((report) => (
               <TableRow key={report.id}>
                 <TableCell className="font-medium">
-                  <Link href={`/visits/${report.id}`} className="text-primary-600 hover:underline">
-                    {report.routine?.plan_number}
+                  <Link href={`/visits/${report.visit?.id}`} className="text-primary-600 hover:underline">
+                    {report.visit?.routine?.plan_number}
                   </Link>
                 </TableCell>
-                <TableCell>{report.routine?.vendor?.name}</TableCell>
+                <TableCell className="max-w-xs truncate">{report.file_name}</TableCell>
+                <TableCell>{report.visit?.routine?.vendor?.name}</TableCell>
                 <TableCell>
-                  {format(new Date(report.scheduled_date), 'MMM d, yyyy')}
-                </TableCell>
-                <TableCell>
-                  {report.report_uploaded_at
-                    ? format(new Date(report.report_uploaded_at), 'MMM d, yyyy')
+                  {report.visit?.scheduled_date
+                    ? format(new Date(report.visit.scheduled_date), 'MMM d, yyyy')
                     : '-'}
                 </TableCell>
-                <TableCell>{report.vendor_coordinator?.full_name}</TableCell>
                 <TableCell>
-                  <Badge variant={getStatusVariant(report.status)}>
-                    {report.status.replace(/_/g, ' ')}
+                  {report.uploaded_at
+                    ? format(new Date(report.uploaded_at), 'MMM d, yyyy')
+                    : '-'}
+                </TableCell>
+                <TableCell>{report.uploaded_by?.full_name}</TableCell>
+                <TableCell>
+                  <Badge variant={getStatusVariant(report.visit?.status || '')}>
+                    {(report.visit?.status || '').replace(/_/g, ' ')}
                   </Badge>
                 </TableCell>
                 <TableCell align="right">
                   <div className="flex items-center justify-end space-x-2">
-                    <Link href={`/visits/${report.id}`}>
+                    <Link href={`/visits/${report.visit?.id}`}>
                       <Button variant="ghost" size="sm" title="View Visit">
                         <Eye className="w-4 h-4" />
                       </Button>

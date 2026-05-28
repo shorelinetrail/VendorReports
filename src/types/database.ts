@@ -21,6 +21,7 @@ export interface User {
   email: string;
   full_name: string;
   role: UserRole;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -31,6 +32,7 @@ export interface Vendor {
   contact_email: string | null;
   contact_phone: string | null;
   address: string | null;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -71,8 +73,6 @@ export interface MaintenanceVisit {
   maintenance_engineer?: User;
   technical_engineer_id: string;
   technical_engineer?: User;
-  report_file_path: string | null;
-  report_uploaded_at: string | null;
   no_report_reason: string | null;
   created_at: string;
   updated_at: string;
@@ -142,18 +142,29 @@ export interface VisitReport {
   updated_at: string;
 }
 
+export interface AuditLog {
+  id: number;
+  table_name: string;
+  record_id: string | null;
+  action: 'INSERT' | 'UPDATE' | 'DELETE';
+  actor_id: string | null;
+  old_data: Record<string, unknown> | null;
+  new_data: Record<string, unknown> | null;
+  created_at: string;
+}
+
 // Database response types
 export interface Database {
   public: {
     Tables: {
       users: {
         Row: User;
-        Insert: Omit<User, 'id' | 'created_at' | 'updated_at'>;
+        Insert: Omit<User, 'id' | 'created_at' | 'updated_at' | 'is_active'> & { is_active?: boolean };
         Update: Partial<Omit<User, 'id' | 'created_at' | 'updated_at'>>;
       };
       vendors: {
         Row: Vendor;
-        Insert: Omit<Vendor, 'id' | 'created_at' | 'updated_at'>;
+        Insert: Omit<Vendor, 'id' | 'created_at' | 'updated_at' | 'is_active'> & { is_active?: boolean };
         Update: Partial<Omit<Vendor, 'id' | 'created_at' | 'updated_at'>>;
       };
       maintenance_routines: {
@@ -185,6 +196,11 @@ export interface Database {
         Row: VisitReport;
         Insert: Omit<VisitReport, 'id' | 'created_at' | 'updated_at' | 'visit' | 'uploaded_by'>;
         Update: Partial<Omit<VisitReport, 'id' | 'created_at' | 'updated_at' | 'visit' | 'uploaded_by'>>;
+      };
+      audit_log: {
+        Row: AuditLog;
+        Insert: never;
+        Update: never;
       };
     };
   };

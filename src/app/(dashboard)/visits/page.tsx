@@ -119,7 +119,7 @@ export default function VisitsPage() {
 
   const handleUploadReport = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedVisit || !file) return;
+    if (!selectedVisit || !file || !userProfile) return;
 
     setError(null);
     setSuccess(null);
@@ -136,16 +136,28 @@ export default function VisitsPage() {
 
       if (uploadError) throw uploadError;
 
-      const { error: updateError } = await supabase
-        .from('maintenance_visits')
-        .update({
-          report_file_path: filePath,
-          report_uploaded_at: new Date().toISOString(),
-          status: 'report_uploaded' as VisitStatus,
-        })
-        .eq('id', selectedVisit.id);
+      const { error: insertError } = await supabase
+        .from('visit_reports')
+        .insert({
+          visit_id: selectedVisit.id,
+          file_path: filePath,
+          file_name: file.name,
+          uploaded_by_id: userProfile.id,
+          uploaded_at: new Date().toISOString(),
+          notes: null,
+        });
 
-      if (updateError) throw updateError;
+      if (insertError) throw insertError;
+
+      // Advance the visit to report_uploaded if it was awaiting a report.
+      if (selectedVisit.status === 'date_confirmed') {
+        const { error: updateError } = await supabase
+          .from('maintenance_visits')
+          .update({ status: 'report_uploaded' as VisitStatus })
+          .eq('id', selectedVisit.id);
+
+        if (updateError) throw updateError;
+      }
 
       setSuccess('Report uploaded successfully');
       await fetchData();
@@ -171,6 +183,7 @@ export default function VisitsPage() {
         .from('maintenance_visits')
         .update({
           confirmed_date: confirmedDate,
+          confirmed_at: new Date().toISOString(),
           status: 'date_confirmed' as VisitStatus,
         })
         .eq('id', visit.id);

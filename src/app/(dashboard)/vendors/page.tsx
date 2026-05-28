@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, Upload, Download } from 'lucide-react';
+import { Plus, Pencil, Upload, Download, Archive, ArchiveRestore } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Vendor } from '@/types/database';
@@ -9,6 +9,7 @@ import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
 import Input from '@/components/ui/Input';
 import Textarea from '@/components/ui/Textarea';
+import Badge from '@/components/ui/Badge';
 import Alert from '@/components/ui/Alert';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 
@@ -127,19 +128,24 @@ export default function VendorsPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this vendor?')) return;
+  // Deactivate/reactivate a vendor instead of hard-deleting. Inactive vendors
+  // are hidden from new-routine selection but their history is preserved.
+  const handleToggleActive = async (vendor: Vendor) => {
+    const deactivating = vendor.is_active !== false;
+    if (deactivating && !confirm(`Deactivate ${vendor.name}?\n\nIt will be hidden from new routine selection. Existing routines are unaffected and it can be reactivated later.`)) {
+      return;
+    }
 
     try {
       const { error } = await supabase
         .from('vendors')
-        .delete()
-        .eq('id', id);
+        .update({ is_active: !(vendor.is_active !== false) })
+        .eq('id', vendor.id);
 
       if (error) throw error;
       await fetchVendors();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Cannot delete vendor - it may be associated with maintenance routines';
+      const message = err instanceof Error ? err.message : 'An error occurred';
       alert(message);
     }
   };
@@ -292,13 +298,14 @@ export default function VendorsPage() {
             <TableHead>Contact Email</TableHead>
             <TableHead>Contact Phone</TableHead>
             <TableHead>Address</TableHead>
+            <TableHead>Status</TableHead>
             {isAdmin && <TableHead align="right">Actions</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
           {vendors.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={isAdmin ? 5 : 4} className="text-center text-gray-500">
+              <TableCell colSpan={isAdmin ? 6 : 5} className="text-center text-gray-500">
                 No vendors found.
               </TableCell>
             </TableRow>
@@ -309,14 +316,28 @@ export default function VendorsPage() {
                 <TableCell>{vendor.contact_email || '-'}</TableCell>
                 <TableCell>{vendor.contact_phone || '-'}</TableCell>
                 <TableCell className="max-w-xs truncate">{vendor.address || '-'}</TableCell>
+                <TableCell>
+                  <Badge variant={vendor.is_active !== false ? 'success' : 'cancelled'}>
+                    {vendor.is_active !== false ? 'Active' : 'Inactive'}
+                  </Badge>
+                </TableCell>
                 {isAdmin && (
                   <TableCell align="right">
                     <div className="flex items-center justify-end space-x-2">
                       <Button variant="ghost" size="sm" onClick={() => handleOpenModal(vendor)}>
                         <Pencil className="w-4 h-4" />
                       </Button>
-                      <Button variant="ghost" size="sm" onClick={() => handleDelete(vendor.id)}>
-                        <Trash2 className="w-4 h-4 text-red-500" />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleToggleActive(vendor)}
+                        title={vendor.is_active !== false ? 'Deactivate' : 'Reactivate'}
+                      >
+                        {vendor.is_active !== false ? (
+                          <Archive className="w-4 h-4 text-red-500" />
+                        ) : (
+                          <ArchiveRestore className="w-4 h-4 text-green-600" />
+                        )}
                       </Button>
                     </div>
                   </TableCell>

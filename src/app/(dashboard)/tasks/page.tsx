@@ -338,7 +338,7 @@ export default function TasksPage() {
                           <Eye className="w-4 h-4" />
                         </Button>
                       </Link>
-                      {task.status === 'pending' && (
+                      {(task.status === 'pending' || task.status === 'overdue') && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -348,7 +348,7 @@ export default function TasksPage() {
                           <Clock className="w-4 h-4 text-blue-500" />
                         </Button>
                       )}
-                      {(task.status === 'pending' || task.status === 'in_progress') && (
+                      {(task.status === 'pending' || task.status === 'in_progress' || task.status === 'overdue') && (
                         <Button
                           variant="ghost"
                           size="sm"

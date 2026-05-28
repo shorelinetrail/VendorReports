@@ -3,6 +3,10 @@
     {
       "path": "/api/visits/generate",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/tasks/expire",
+      "schedule": "0 7 * * *"
     }
   ]
 }
