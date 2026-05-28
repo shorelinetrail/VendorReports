@@ -717,6 +717,12 @@ export default function VisitDetailPage() {
       alert('SAP notification number and due date are required before completing this recommendation.');
       return;
     }
+    // A draft recommendation on a review-required routine must go through the
+    // technical engineer (via "All Recommendations Created") before completion.
+    if (rec?.status === 'open' && (visit?.routine?.requires_technical_review ?? true)) {
+      alert('This recommendation must be sent for technical review before it can be completed. Use "All Recommendations Created".');
+      return;
+    }
 
     try {
       const { error } = await supabase
@@ -1660,15 +1666,18 @@ export default function VisitDetailPage() {
                           <Edit3 className="w-3 h-3 mr-1" />SAP
                         </Button>
                       )}
-                      {(rec.status === 'open' || (rec.status === 'approved' && rec.review_decision !== 'request_sap')) && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
-                        <>
-                          <Button variant="ghost" size="sm" onClick={() => handleCompleteRecommendation(rec.id)} className="h-7 w-7 p-0" title="Mark complete">
-                            <CheckCircle className="w-4 h-4 text-green-500" />
-                          </Button>
-                          <Button variant="ghost" size="sm" onClick={() => handleCancelRecommendation(rec.id)} className="h-7 w-7 p-0" title="Cancel">
-                            <XCircle className="w-4 h-4 text-red-500" />
-                          </Button>
-                        </>
+                      {/* Complete: a draft (open) rec can only be completed directly
+                          when the routine does NOT require technical review; otherwise it
+                          must go through review (via "All Recommendations Created"). */}
+                      {((rec.status === 'open' && !(visit.routine?.requires_technical_review ?? true)) || (rec.status === 'approved' && rec.review_decision !== 'request_sap')) && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
+                        <Button variant="ghost" size="sm" onClick={() => handleCompleteRecommendation(rec.id)} className="h-7 w-7 p-0" title="Mark complete">
+                          <CheckCircle className="w-4 h-4 text-green-500" />
+                        </Button>
+                      )}
+                      {(rec.status === 'open' || rec.status === 'approved') && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
+                        <Button variant="ghost" size="sm" onClick={() => handleCancelRecommendation(rec.id)} className="h-7 w-7 p-0" title="Cancel">
+                          <XCircle className="w-4 h-4 text-red-500" />
+                        </Button>
                       )}
                     </div>
                   </div>
@@ -1751,25 +1760,25 @@ export default function VisitDetailPage() {
                                 <Edit3 className="w-4 h-4" />
                               </Button>
                             )}
-                            {(rec.status === 'open' || (rec.status === 'approved' && rec.review_decision !== 'request_sap')) && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleCompleteRecommendation(rec.id)}
-                                  title="Mark Complete"
-                                >
-                                  <CheckCircle className="w-4 h-4 text-green-500" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleCancelRecommendation(rec.id)}
-                                  title="Cancel"
-                                >
-                                  <XCircle className="w-4 h-4 text-red-500" />
-                                </Button>
-                              </>
+                            {((rec.status === 'open' && !(visit.routine?.requires_technical_review ?? true)) || (rec.status === 'approved' && rec.review_decision !== 'request_sap')) && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleCompleteRecommendation(rec.id)}
+                                title="Mark Complete"
+                              >
+                                <CheckCircle className="w-4 h-4 text-green-500" />
+                              </Button>
+                            )}
+                            {(rec.status === 'open' || rec.status === 'approved') && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleCancelRecommendation(rec.id)}
+                                title="Cancel"
+                              >
+                                <XCircle className="w-4 h-4 text-red-500" />
+                              </Button>
                             )}
                           </div>
                         </TableCell>
