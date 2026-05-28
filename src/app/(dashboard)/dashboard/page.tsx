@@ -108,8 +108,8 @@ export default function DashboardPage() {
             .from('maintenance_visits')
             .select('id', { count: 'exact', head: true })
             .eq('status', 'completed')
-            .gte('updated_at', monthStart)
-            .lte('updated_at', monthEnd),
+            .gte('completed_at', monthStart)
+            .lte('completed_at', monthEnd),
         ]);
 
         const overdueTasks = tasksRes.data?.filter((t: { due_date: string; status: string }) =>

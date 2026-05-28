@@ -152,7 +152,6 @@ export default function TasksPage() {
   const statusOptions = [
     { value: 'all', label: 'All Tasks' },
     { value: 'pending', label: 'Pending' },
-    { value: 'in_progress', label: 'In Progress' },
     { value: 'overdue', label: 'Overdue' },
     { value: 'completed', label: 'Completed' },
     { value: 'cancelled', label: 'Cancelled' },
@@ -160,7 +159,6 @@ export default function TasksPage() {
 
   const taskCounts = {
     pending: tasks.filter((t) => t.status === 'pending').length,
-    in_progress: tasks.filter((t) => t.status === 'in_progress').length,
     overdue: tasks.filter((t) => isBefore(new Date(t.due_date), new Date()) && t.status !== 'completed' && t.status !== 'cancelled').length,
     completed: tasks.filter((t) => t.status === 'completed').length,
   };
@@ -184,7 +182,7 @@ export default function TasksPage() {
       </div>
 
       {/* Task Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center">
@@ -192,17 +190,6 @@ export default function TasksPage() {
               <div className="ml-3">
                 <p className="text-sm text-gray-500">Pending</p>
                 <p className="text-2xl font-bold">{taskCounts.pending}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center">
-              <Clock className="w-8 h-8 text-blue-500" />
-              <div className="ml-3">
-                <p className="text-sm text-gray-500">In Progress</p>
-                <p className="text-2xl font-bold">{taskCounts.in_progress}</p>
               </div>
             </div>
           </CardContent>

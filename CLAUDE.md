@@ -19,7 +19,7 @@ Copy `.env.example` to `.env.local`. The app needs `NEXT_PUBLIC_SUPABASE_URL` an
 
 ### Database
 
-Schema lives in `supabase/migrations/` as numbered SQL files. There is no local Supabase CLI workflow wired up — migrations are applied by pasting them into the Supabase dashboard SQL Editor, in order. When changing the schema, add a new numbered migration **and** update the TypeScript types in `src/types/database.ts` to match (the `Database` interface there is hand-maintained, not generated).
+Schema lives in `supabase/migrations/` as numbered SQL files. There is no local Supabase CLI workflow wired up — migrations are applied by pasting them into the Supabase dashboard SQL Editor, in order. When changing the schema, add a new numbered migration **and** update the TypeScript types in `src/types/database.ts` to match (the `Database` interface there is hand-maintained, not generated). Apply migrations **in lockstep with the matching deploy**: several are destructive or change enforcement (e.g. 013 drops columns, 018 renames a config key, 016/019 change RLS/triggers), so running them out of sync with the app will break reads/writes.
 
 ## Architecture
 

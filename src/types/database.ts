@@ -80,6 +80,9 @@ export interface MaintenanceVisit {
   no_recommendations_approved: boolean;
   no_recommendations_reviewed_by_id: string | null;
   no_recommendations_reviewed_at: string | null;
+  cancelled_at: string | null;
+  cancellation_reason: string | null;
+  completed_at: string | null;
   created_at: string;
   updated_at: string;
 }

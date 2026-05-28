@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Upload, Eye, CheckCircle, Trash2 } from 'lucide-react';
+import { Plus, Upload, Eye, CheckCircle, XCircle } from 'lucide-react';
 import { format, addMonths, isBefore } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -222,31 +222,30 @@ export default function VisitsPage() {
     }
   };
 
-  const handleDeleteVisit = async (visit: VisitWithDetails) => {
-    if (!confirm(`Are you sure you want to delete visit for ${visit.routine?.plan_number}?\n\nThis will also delete all associated tasks and recommendations. This action cannot be undone.`)) {
-      return;
-    }
+  // Cancel a visit (soft) rather than destructively deleting it and its history.
+  const handleCancelVisit = async (visit: VisitWithDetails) => {
+    const reason = prompt(`Cancel the visit for ${visit.routine?.plan_number}?\n\nIt will be archived (its history is kept). Optionally enter a reason:`);
+    if (reason === null) return;
 
     try {
-      // Delete associated recommendations first
-      await supabase
-        .from('recommendations')
-        .delete()
-        .eq('visit_id', visit.id);
-
-      // Delete associated tasks
-      await supabase
-        .from('tasks')
-        .delete()
-        .eq('visit_id', visit.id);
-
-      // Delete the visit
       const { error } = await supabase
         .from('maintenance_visits')
-        .delete()
-        .eq('id', visit.id);
+        .update({
+          status: 'cancelled' as VisitStatus,
+          cancelled_at: new Date().toISOString(),
+          cancellation_reason: reason || null,
+        })
+        .eq('id', visit.id)
+        .not('status', 'in', '("completed","cancelled")');
 
       if (error) throw error;
+
+      await supabase
+        .from('tasks')
+        .update({ status: 'cancelled' })
+        .eq('visit_id', visit.id)
+        .in('status', ['pending', 'in_progress', 'overdue']);
+
       await fetchData();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
@@ -393,14 +392,14 @@ export default function VisitsPage() {
                         <Upload className="w-4 h-4 text-blue-500" />
                       </Button>
                     )}
-                    {hasRole('admin') && (
+                    {hasRole('admin') && visit.status !== 'completed' && visit.status !== 'cancelled' && (
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleDeleteVisit(visit)}
-                        title="Delete Visit"
+                        onClick={() => handleCancelVisit(visit)}
+                        title="Cancel Visit"
                       >
-                        <Trash2 className="w-4 h-4 text-red-500" />
+                        <XCircle className="w-4 h-4 text-red-500" />
                       </Button>
                     )}
                   </div>

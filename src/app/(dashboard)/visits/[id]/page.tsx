@@ -312,6 +312,12 @@ export default function VisitDetailPage() {
         // Close the upload task and queue the recommendations task.
         await completeVisitTasks(supabase, visitId, ['upload_report']);
         await createRecommendationsTask(supabase, visitId, visit.maintenance_engineer_id);
+      } else if (visit.no_report_reason) {
+        // A report has now arrived for a visit previously marked "no report".
+        await supabase
+          .from('maintenance_visits')
+          .update({ no_report_reason: null })
+          .eq('id', visitId);
       }
 
       await fetchVisitData();
@@ -412,12 +418,13 @@ export default function VisitDetailPage() {
 
       if (error) throw error;
 
-      // Move the visit into the recommendations stage, and mark the set as not
-      // yet finalised (adding a recommendation re-opens the decision).
+      // Mark the set as not yet finalised (adding a recommendation re-opens the
+      // decision). Advance from report_uploaded, but don't regress an in_review
+      // visit that still has earlier recommendations with the technical engineer.
       await supabase
         .from('maintenance_visits')
         .update({
-          status: 'recommendations_created' as VisitStatus,
+          status: (visit.status === 'report_uploaded' ? 'recommendations_created' : visit.status) as VisitStatus,
           recommendations_complete: false,
           no_recommendations_required: false,
         })
@@ -537,7 +544,10 @@ export default function VisitDetailPage() {
           no_recommendations_reviewed_by_id: userProfile.id,
           no_recommendations_reviewed_at: new Date().toISOString(),
         })
-        .eq('id', visitId);
+        .eq('id', visitId)
+        // Concurrency guard: only act on a still-pending declaration.
+        .eq('no_recommendations_required', true)
+        .eq('no_recommendations_approved', false);
 
       await completeVisitTasks(supabase, visitId, ['technical_review']);
       await createCloseVisitTask(supabase, visitId, visit.maintenance_engineer_id);
@@ -566,7 +576,10 @@ export default function VisitDetailPage() {
           no_recommendations_reviewed_by_id: userProfile.id,
           no_recommendations_reviewed_at: new Date().toISOString(),
         })
-        .eq('id', visitId);
+        .eq('id', visitId)
+        // Concurrency guard: only act on a still-pending declaration.
+        .eq('no_recommendations_required', true)
+        .eq('no_recommendations_approved', false);
 
       await completeVisitTasks(supabase, visitId, ['technical_review']);
       await createRecommendationsTask(supabase, visitId, visit.maintenance_engineer_id);
@@ -591,36 +604,20 @@ export default function VisitDetailPage() {
     setSubmitting(true);
 
     try {
-      const note = `Forwarded by ${userProfile?.full_name || 'maintenance engineer'}${forwardData.comment ? `: ${forwardData.comment}` : ''}`;
-
-      // Reassign (or create) the create-recommendations task BEFORE changing the
-      // visit's assigned engineer, so the current user still passes RLS.
-      const { data: openTasks } = await supabase
-        .from('tasks')
-        .select('id')
-        .eq('visit_id', visitId)
-        .eq('task_type', 'create_recommendations')
-        .in('status', ['pending', 'in_progress', 'overdue']);
-
-      if (openTasks && openTasks.length > 0) {
-        await supabase
-          .from('tasks')
-          .update({ assigned_to_id: forwardData.to_id, notes: note })
-          .in('id', openTasks.map((t: { id: string }) => t.id));
-      } else {
-        await createRecommendationsTask(supabase, visitId, forwardData.to_id);
-      }
-
-      const { error: updateError } = await supabase
-        .from('maintenance_visits')
-        .update({ maintenance_engineer_id: forwardData.to_id })
-        .eq('id', visitId);
-
-      if (updateError) throw updateError;
+      // Reassigning the visit away from yourself is blocked by the scoped RLS
+      // policy, so this goes through a server route (service role) that verifies
+      // the caller is the current maintenance engineer or an admin.
+      const response = await fetch('/api/visits/forward', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visit_id: visitId, to_id: forwardData.to_id, comment: forwardData.comment }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Failed to forward');
 
       await fetchVisitData();
       setForwardModalOpen(false);
-      const toName = users.find(u => u.id === forwardData.to_id)?.full_name || 'selected user';
+      const toName = users.find(u => u.id === forwardData.to_id)?.full_name || result.to || 'selected user';
       setForwardData({ to_id: '', comment: '' });
       setSuccess(`Forwarded to ${toName}`);
     } catch (err: unknown) {
@@ -817,11 +814,13 @@ export default function VisitDetailPage() {
     }
 
     try {
-      // Update visit status to completed
+      // Update visit status to completed. The status precondition makes this a
+      // no-op if another user already closed/cancelled it (avoids clobbering).
       const { error: visitError } = await supabase
         .from('maintenance_visits')
-        .update({ status: 'completed' as VisitStatus })
-        .eq('id', visitId);
+        .update({ status: 'completed' as VisitStatus, completed_at: new Date().toISOString() })
+        .eq('id', visitId)
+        .not('status', 'in', '("completed","cancelled")');
 
       if (visitError) throw visitError;
 
@@ -842,23 +841,77 @@ export default function VisitDetailPage() {
   };
 
   const handleReopenVisit = async () => {
-    if (!confirm('Are you sure you want to reopen this visit? This will allow adding new recommendations.')) {
+    if (!visit) return;
+    if (!confirm('Are you sure you want to reopen this visit? This will allow adding/finalising recommendations again.')) {
       return;
     }
 
     try {
-      // Determine the appropriate status based on recommendations
+      // Recompute a sensible status from the visit's data (works for both
+      // completed and cancelled visits) and clear the recommendation-phase
+      // decision so the engineer can act again.
+      const hasReportsNow = visitReports.length > 0 || !!visit.no_report_reason;
       const hasInReviewRecs = recommendations.some(r => r.status === 'in_review');
-      const newStatus: VisitStatus = hasInReviewRecs ? 'in_review' : 'recommendations_created';
+      const hasRecsNow = recommendations.length > 0;
+      let newStatus: VisitStatus;
+      if (hasInReviewRecs) newStatus = 'in_review';
+      else if (hasRecsNow) newStatus = 'recommendations_created';
+      else if (hasReportsNow) newStatus = 'report_uploaded';
+      else if (visit.confirmed_date) newStatus = 'date_confirmed';
+      else newStatus = 'scheduled';
 
       const { error: visitError } = await supabase
         .from('maintenance_visits')
-        .update({ status: newStatus })
+        .update({
+          status: newStatus,
+          completed_at: null,
+          cancelled_at: null,
+          cancellation_reason: null,
+          recommendations_complete: false,
+          no_recommendations_required: false,
+          no_recommendations_approved: false,
+          no_recommendations_at: null,
+          no_recommendations_reviewed_by_id: null,
+          no_recommendations_reviewed_at: null,
+        })
         .eq('id', visitId);
 
       if (visitError) throw visitError;
 
       await fetchVisitData();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      alert(message);
+    }
+  };
+
+  const handleCancelVisit = async () => {
+    if (!visit) return;
+    const reason = prompt('Reason for cancelling this visit:');
+    if (reason === null) return;
+
+    try {
+      const { error } = await supabase
+        .from('maintenance_visits')
+        .update({
+          status: 'cancelled' as VisitStatus,
+          cancelled_at: new Date().toISOString(),
+          cancellation_reason: reason || null,
+        })
+        .eq('id', visitId)
+        .not('status', 'in', '("completed","cancelled")');
+
+      if (error) throw error;
+
+      // Cancel any remaining open tasks for this visit.
+      await supabase
+        .from('tasks')
+        .update({ status: 'cancelled' })
+        .eq('visit_id', visitId)
+        .in('status', ['pending', 'in_progress', 'overdue']);
+
+      await fetchVisitData();
+      setSuccess('Visit cancelled');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       alert(message);
@@ -886,7 +939,9 @@ export default function VisitDetailPage() {
           status: 'scheduled' as VisitStatus,
           reschedule_reason: rescheduleData.reason,
           rescheduled_at: new Date().toISOString(),
-          rescheduled_from: oldDate,
+          // Preserve the *original* canonical date across repeated reschedules so
+          // the generator never regenerates the original occurrence.
+          rescheduled_from: visit.rescheduled_from || oldDate,
         })
         .eq('id', visitId);
 
@@ -1065,6 +1120,10 @@ export default function VisitDetailPage() {
         if (awaitingReview) {
           return { name: visit.technical_engineer?.full_name || 'Technical Engineer', role: 'Technical Engineer', action: 'to review recommendations' };
         }
+        const hasUnsentDrafts = recommendations.some(r => r.status === 'open' && !r.sent_for_review);
+        if (hasUnsentDrafts) {
+          return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to finalise the newly added recommendations' };
+        }
         return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to complete approved recommendations and close the visit' };
       }
       default:
@@ -1092,7 +1151,7 @@ export default function VisitDetailPage() {
   const {
     canConfirmDate, canUploadReport, canCreateRecommendation, canReview, canReschedule,
     canCloseVisit, canReopenVisit, hasReports, canFinalizeRecommendations,
-    canDeclareNoRecs, canApproveNoRecs, canForwardRecommendations,
+    canDeclareNoRecs, canApproveNoRecs, canForwardRecommendations, canCancelVisit,
   } = useMemo(() => {
     if (!visit) {
       return {
@@ -1108,6 +1167,7 @@ export default function VisitDetailPage() {
         canDeclareNoRecs: false,
         canApproveNoRecs: false,
         canForwardRecommendations: false,
+        canCancelVisit: false,
       };
     }
 
@@ -1122,32 +1182,37 @@ export default function VisitDetailPage() {
     const hasRecs = recommendations.length > 0;
     // Every recommendation resolved (true when there are none).
     const recsResolved = recommendations.every(r => r.status === 'completed' || r.status === 'cancelled');
-    // The engineer is still in the "create recommendations" phase.
-    const inRecPhase = (visit.status === 'report_uploaded' || visit.status === 'recommendations_created') && !visit.no_recommendations_required;
+    // The engineer is still in the create/finalise phase (before any review).
+    const preFinalisePhase = (visit.status === 'report_uploaded' || visit.status === 'recommendations_created') && !visit.no_recommendations_required;
 
     return {
       canConfirmDate: isVendorCoord || isAdmin,
       // Any assigned team member (coordinator, maintenance/technical engineer)
       // or an admin may upload a report; engineers just aren't assigned a task.
-      canUploadReport: (isVendorCoord || isMaintEng || isTechEng || isAdmin) && (visit.status === 'date_confirmed' || (visitReports.length > 0 && isNotClosed)),
+      // Allowed once a date is confirmed, or to add to / replace a no-report visit.
+      canUploadReport: (isVendorCoord || isMaintEng || isTechEng || isAdmin) && isNotClosed
+        && (visit.status === 'date_confirmed' || visitReports.length > 0 || !!visit.no_report_reason),
       hasReports: _hasReports,
       canCreateRecommendation: (isMaintEng || isAdmin) && _hasReports && isNotClosed && !visit.no_recommendations_required,
       canReview: isTechEng || isAdmin,
       // Reschedule only makes sense before a report exists for the visit.
       canReschedule: (isVendorCoord || isAdmin) && (visit.status === 'scheduled' || visit.status === 'date_confirmed'),
-      // "All recommendations created": at least one recommendation, not yet finalised.
-      canFinalizeRecommendations: (isMaintEng || isAdmin) && _hasReports && inRecPhase && hasRecs && !visit.recommendations_complete,
-      // "No recommendations required": no recommendations yet, not already declared.
-      canDeclareNoRecs: (isMaintEng || isAdmin) && _hasReports && inRecPhase && !hasRecs && !visit.recommendations_complete,
-      // Forward the create-recommendations step to another engineer.
-      canForwardRecommendations: (isMaintEng || isAdmin) && _hasReports && inRecPhase,
+      // "All recommendations created": there are recs and the set isn't finalised.
+      // Independent of status so a newly added draft (during review) can be sent.
+      canFinalizeRecommendations: (isMaintEng || isAdmin) && _hasReports && isNotClosed && !visit.no_recommendations_required && hasRecs && !visit.recommendations_complete,
+      // "No recommendations required": no recs yet, before finalising/review.
+      canDeclareNoRecs: (isMaintEng || isAdmin) && _hasReports && preFinalisePhase && !hasRecs && !visit.recommendations_complete,
+      // Forward the create-recommendations step to another engineer (pre-review only).
+      canForwardRecommendations: (isMaintEng || isAdmin) && _hasReports && preFinalisePhase && !visit.recommendations_complete,
       // Technical engineer approves/rejects a "no recommendations required" declaration.
       canApproveNoRecs: (isTechEng || isAdmin) && isNotClosed && reqReview && visit.no_recommendations_required && !visit.no_recommendations_approved,
       // Closable once finalised, a report exists, everything resolved, and (for
       // a no-recs declaration under review) the technical engineer has approved.
       canCloseVisit: (isMaintEng || isAdmin) && isNotClosed && _hasReports && visit.recommendations_complete && recsResolved
         && (!visit.no_recommendations_required || !reqReview || visit.no_recommendations_approved),
-      canReopenVisit: isAdmin && visit.status === 'completed',
+      // Admins can cancel an in-flight visit, or reopen a completed/cancelled one.
+      canCancelVisit: isAdmin && isNotClosed,
+      canReopenVisit: isAdmin && (visit.status === 'completed' || visit.status === 'cancelled'),
     };
   }, [visit, visitReports.length, recommendations, userProfile?.id, hasRole]);
 
@@ -1211,6 +1276,11 @@ export default function VisitDetailPage() {
         event: visit.no_recommendations_approved ? 'No recommendations approved' : 'No recommendations rejected',
         by: visit.technical_engineer?.full_name,
       });
+    }
+
+    // Visit cancelled
+    if (visit.cancelled_at) {
+      items.push({ date: visit.cancelled_at, event: 'Visit cancelled', details: visit.cancellation_reason || undefined });
     }
 
     // Recommendations
@@ -1588,11 +1658,20 @@ export default function VisitDetailPage() {
                 <span className="sm:hidden ml-1">Close</span>
               </Button>
             )}
-            {visit.status === 'completed' && (
+            {canCancelVisit && (
+              <Button variant="secondary" onClick={handleCancelVisit} size="sm" className="text-xs sm:text-sm text-red-600">
+                <XCircle className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Cancel Visit</span>
+                <span className="sm:hidden ml-1">Cancel</span>
+              </Button>
+            )}
+            {(visit.status === 'completed' || visit.status === 'cancelled') && (
               <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
-                <div className="flex items-center text-green-600">
-                  <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2" />
-                  <span className="font-medium text-sm sm:text-base">Completed</span>
+                <div className={`flex items-center ${visit.status === 'completed' ? 'text-green-600' : 'text-gray-500'}`}>
+                  {visit.status === 'completed'
+                    ? <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2" />
+                    : <XCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2" />}
+                  <span className="font-medium text-sm sm:text-base">{visit.status === 'completed' ? 'Completed' : 'Cancelled'}</span>
                 </div>
                 {canReopenVisit && (
                   <Button variant="secondary" onClick={handleReopenVisit} size="sm" className="text-xs sm:text-sm">
