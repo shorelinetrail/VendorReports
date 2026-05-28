@@ -57,9 +57,11 @@ system_config  (global deadline settings, admin-editable)
 - **recommendations** — action items raised from a report, with the technical-review
   decision fields (migration 006: `review_decision`, `review_action_description`,
   `action_assigned_to_id`).
-- **visit_reports** — multiple report files per visit (migration 005). The legacy
-  `report_file_path`/`report_uploaded_at` columns on `maintenance_visits` are kept in
-  sync only for the **first** report, for backward compatibility.
+- **visit_reports** — multiple report files per visit (migration 005); this is now the
+  single source of report data. The legacy `report_file_path`/`report_uploaded_at`
+  columns on `maintenance_visits` were dropped in migration 013.
+- **audit_log** — append-only history of every write to the core tables, written by DB
+  triggers (migration 008); admin-readable only.
 
 ---
 
@@ -70,21 +72,25 @@ system_config  (global deadline settings, admin-editable)
 ```
 scheduled → date_confirmed → report_uploaded → recommendations_created → in_review → completed
     │                                                                                    ▲
-    └──────────────────────────── (reschedule resets to scheduled) ─────────────────────┘
+    └────────── (reschedule resets to scheduled — only before a report exists) ──────────┘
                                               cancelled  ── terminal
 ```
 
-All transitions are driven from `src/app/(dashboard)/visits/[id]/page.tsx`.
+All transitions are driven from `src/app/(dashboard)/visits/[id]/page.tsx`. Each transition
+advances the per-visit **task chain** via the shared helpers in `src/lib/workflow/tasks.ts`
+(completing the current step's task and queuing the next).
 
 ### Step 0 — Visit generation (automated)
 `src/app/api/visits/generate/route.ts`, scheduled daily at 06:00 UTC via `vercel.json`.
 
 - Walks every **active** routine, projects scheduled dates from `start_date` at
   `interval_months` spacing, out to `today + call_horizon_months`.
-- Inserts any missing visit (deduped on `routine_id` + `scheduled_date`), copying the
-  routine's three assigned users onto the visit.
-- Seeds the first `confirm_visit_date` task for the vendor coordinator, due
-  `visit_confirmation_days` before the visit — **only if that due date is still in the future**.
+- Inserts any missing visit, copying the routine's three assigned users. De-dup is on
+  `routine_id` + `scheduled_date` **and** skips any canonical date a visit was already
+  rescheduled away from (`rescheduled_from`), so reschedules no longer regenerate duplicates.
+- Always seeds the `confirm_visit_date` task for the vendor coordinator, due
+  `visit_confirmation_days` before the visit (clamped to today if that date has already
+  passed, so the task is never silently skipped).
 - Auth: allowed for Vercel cron (`x-vercel-cron` header), a `CRON_SECRET` bearer token,
   or an authenticated admin. Uses the **service-role** client and bypasses RLS.
 - Can also be triggered manually by an admin from the Settings page.
@@ -93,93 +99,103 @@ All transitions are driven from `src/app/(dashboard)/visits/[id]/page.tsx`.
 > happens on the cron run or a manual trigger.
 
 ### Step 1 → 2 — Confirm date
-Vendor coordinator (or admin) clicks *Confirm Visit Date*. Sets `confirmed_date`,
-`confirmed_at`, status → `date_confirmed`. **The date is captured via a browser
-`prompt()`** (`handleConfirmDate`, line 178) — no validation or date picker.
+Vendor coordinator (or admin) confirms the date via a **date-picker modal**
+(`handleConfirmDate`). Sets `confirmed_date`, `confirmed_at`, status → `date_confirmed`,
+completes the `confirm_visit_date` task, and queues the `upload_report` task (due
+`report_upload_weeks` after the confirmed date).
 
 ### Step 2 → 3 — Upload report (or mark none)
-`handleUploadReport` (line 200): uploads the file to the private `reports` storage bucket,
-inserts a `visit_reports` row, and — for the first report only — updates the legacy visit
-columns and sets status → `report_uploaded`.
-Alternatively *No Report Available* (`handleNoReportAvailable`, line 714) records a reason
-and advances status to `report_uploaded` with no file.
+`handleUploadReport`: uploads the file to the private `reports` bucket (object key
+`<visit_id>/<ts>.<ext>`), inserts a `visit_reports` row (multiple reports supported), and,
+when the visit was awaiting a report, advances status → `report_uploaded`, completes the
+`upload_report` task, and queues the `create_recommendations` task.
+*No Report Available* (`handleNoReportAvailable`) records a reason and does the same status
+/ task advance with no file.
 
 ### Step 3 → 4/5 — Create recommendations
-`handleCreateRecommendation` (line 324). Behavior **branches on the routine's
-`requires_technical_review` flag**:
+`handleCreateRecommendation` **branches on the routine's `requires_technical_review` flag**:
 - If review required: recommendation starts `in_review` with `sent_for_review = true`,
-  visit → `in_review`, and a `technical_review` task is created for the technical engineer,
-  due `technical_review_days` out.
+  visit → `in_review`, and a `technical_review` task is created for the technical engineer
+  (linked to the recommendation via its `notes`), due `technical_review_days` out.
 - If not required: recommendation starts `open`, visit → `recommendations_created`.
+- Either way, the `create_recommendations` task is completed.
 
 ### Step 5 — Technical review
-`handleSubmitReview` (line 442). The technical engineer records a structured
-`review_decision`:
+`handleSubmitReview`. The technical engineer records a structured `review_decision`:
 - `no_action` → recommendation marked `completed` immediately.
 - `request_sap` → `approved`; a SAP notification number + due date must later be filled in
   (`handleSaveSapDetails`) before it can be completed.
 - `other_action` → `approved` with an action description and an `action_assigned_to_id`.
 
-Submitting a review also completes the matching pending `technical_review` task.
+Submitting a review completes **only that recommendation's** `technical_review` task
+(matched by `notes`), and queues a `close_visit` task if it resolved the last open one.
 
 ### Step 6 — Close visit
-*Close Visit* (`handleCloseVisit`, line 587) is enabled for the maintenance engineer/admin
-**only when every recommendation is `completed` or `cancelled`** (`allRecsDone`, line 870).
-Sets visit → `completed` and closes any open `close_visit` task. Admins can *Reopen*
-a completed visit (`handleReopenVisit`), which recomputes status back to `in_review` or
-`recommendations_created`.
+*Close Visit* (`handleCloseVisit`) is enabled for the maintenance engineer/admin once a
+report (or no-report reason) is recorded and **no recommendation is still open** — including
+the common case of a visit with **no recommendations at all**. It sets visit → `completed`
+and sweeps any remaining open workflow tasks to completed. Admins can *Reopen* a completed
+visit (`handleReopenVisit`), which recomputes status to `in_review` or `recommendations_created`.
 
 ### Side transitions
-- **Reschedule** (`handleRescheduleVisit`, line 645): sets a new `scheduled_date`, clears
-  `confirmed_date`, resets status → `scheduled`, records `rescheduled_from`/`reason`,
-  cancels the old confirm task and creates a fresh one.
+- **Reschedule** (`handleRescheduleVisit`): allowed only while `scheduled`/`date_confirmed`
+  (before a report exists). Sets a new `scheduled_date`, clears `confirmed_date`, resets
+  status → `scheduled`, records `reason` and preserves the **original** `rescheduled_from`
+  date across repeated reschedules, cancels the old confirm task and creates a fresh one.
 - **Reassign team** (admin only, `handleReassignTeam`): swaps the three assigned users on
-  the visit. Does **not** reassign existing open tasks to the new people.
+  the visit. Does **not** reassign existing open tasks to the new people (open gap #9).
 
-An **activity log** is reconstructed on the client (`activities` memo, line 885) by
-stitching together timestamps across the visit, reports, recommendations, and completed
-tasks. It is *derived*, not a stored audit trail.
+An **activity log** is reconstructed on the client (`activities` memo) by stitching together
+timestamps across the visit, reports, recommendations, and completed tasks. (The durable,
+queryable history now lives in `audit_log`.)
 
 ---
 
 ## 4. Tasks Workflow
 
 - `task_type` ∈ `confirm_visit_date`, `upload_report`, `create_recommendations`,
-  `review_recommendations`, `technical_review`, `close_visit`. (Note: `close_visit` exists
-  in the TypeScript `TaskType` but **not** in the SQL `task_type` enum in migration 001 —
-  see gaps.)
-- In practice only `confirm_visit_date` (by the generator/reschedule) and `technical_review`
-  (on send-for-review) are auto-created. The others are largely unused.
+  `review_recommendations`, `technical_review`, `close_visit`. (`close_visit` was added to
+  the SQL `task_type` enum in migration 011.)
+- The chain is now driven end-to-end (see `src/lib/workflow/tasks.ts`): `confirm_visit_date`
+  (generator) → `upload_report` (on confirm) → `create_recommendations` (on report) →
+  `technical_review` (per recommendation, when review is required) → `close_visit` (when the
+  last recommendation resolves). Each step completes its predecessor.
 - The Tasks page lists tasks by due date and lets users mark them in-progress/complete.
-- **"Overdue" is computed client-side** (`isBefore(due_date, today)`); no stored `overdue`
-  status and nothing transitions tasks automatically when a deadline passes.
+- **Overdue** is both shown client-side and **persisted**: a second daily cron
+  (`/api/tasks/expire`, 07:00 UTC) flips past-due `pending`/`in_progress` tasks to the
+  `overdue` status. Visit handlers complete tasks regardless of `overdue` state, and closing
+  a visit sweeps any stragglers, so tasks no longer linger as permanently overdue.
 
 ---
 
 ## 5. Supporting Workflows
 
 - **Routines** (`routines/page.tsx`) — admins & vendor coordinators create/edit; CSV bulk
-  upload validates that referenced vendors and engineer emails exist. Deleting a routine
-  cascades to its visits/tasks/recommendations.
+  upload validates that referenced vendors and engineer emails exist. "Delete" now
+  **archives** (sets `is_active = false`) instead of cascade-deleting; inactive routines are
+  skipped by the generator and can be reactivated.
 - **Recommendations** (`recommendations/page.tsx`) — cross-visit aggregate view with status
   filtering; review/complete/cancel actions are available here as well as on the visit page.
-- **Dashboard** (`dashboard/page.tsx`) — stat cards, a 3-month interactive calendar of
-  visits colored by status, upcoming visits (next 30 days), and the user's pending tasks.
+- **Dashboard** (`dashboard/page.tsx`) — stat cards (including a now-computed "Completed This
+  Month"), a 3-month interactive calendar of visits colored by status, upcoming visits (next
+  30 days), and the user's pending tasks.
 - **Analytics** (`reports/page.tsx`) — monthly trend, status distribution, vendor
   performance charts; CSV export of summary + vendor breakdown; 3/6/12-month range.
-- **Maintenance Reports** (`reports/maintenance/page.tsx`) — filterable list of visits that
-  have reports, with per-file download.
+- **Maintenance Reports** (`reports/maintenance/page.tsx`) — enumerates **every**
+  `visit_reports` row (filterable/sortable), with per-file download.
 - **Users** (`users/page.tsx` + `api/users`) — admin-only. Creation goes through a
   service-role API route so the admin's own session isn't disturbed; auto-confirms email.
-  Hard delete only (blocked by FK if the user is referenced).
+  "Delete" is now **deactivate/reactivate** (`is_active`) — archive-only, not access
+  revocation (see CLAUDE.md). Inactive users are excluded from assignment dropdowns.
+- **Vendors** (`vendors/page.tsx`) — admin-only; same deactivate/reactivate soft-delete.
 - **Vendors** (`vendors/page.tsx`) — admin-only CRUD; delete blocked if referenced by a routine.
 - **Settings** (`settings/page.tsx`) — admin-only editing of the four `system_config`
   deadline values, plus the manual visit-generation trigger.
 
 ### Auth / onboarding
-- **Self-signup is open to anyone** (`signup/page.tsx`) and the user **picks their own role**
-  from coordinator / maintenance engineer / technical engineer (admin is not offered).
-  Account creation depends on the Supabase email-confirmation setting.
+- **Public self-signup is disabled.** `/signup` shows a notice and redirects to `/login`;
+  the login page no longer links to it. Accounts are created only by an admin via the
+  service-role API on the Users page.
 
 ---
 
@@ -285,5 +301,36 @@ Ordered roughly by impact. Items are marked **[verified in code]** where confirm
 
 ---
 
-*Generated for review on 2026-05-28. File references point to the state of the repo at the
-time of writing; line numbers in `visits/[id]/page.tsx` may shift as that file changes.*
+## 7. Lifecycle design-error review (resolved)
+
+A separate step-through of the visit lifecycle surfaced eight design errors, all now fixed
+(see `src/lib/workflow/tasks.ts`, the visit pages, the generator, and migration 015):
+
+1. **Zero-recommendation visits couldn't be closed.** The close gate required at least one
+   recommendation. Now closable once a report (or no-report reason) is recorded and no
+   recommendation is still open — covering the common "nothing to flag" case.
+2. **Confirming/uploading never completed the matching task.** Each transition now completes
+   its task, so they no longer linger and (since the overdue cron) age into permanent overdue.
+3. **Reschedule regenerated the original occurrence.** The generator now skips canonical dates
+   a visit was rescheduled away from, and reschedule preserves the original `rescheduled_from`.
+4. **Reviewing one recommendation completed all technical-review tasks.** Completion is now
+   matched to the specific recommendation via the task `notes`.
+5. **Four of six task types were never created.** The full chain (`upload_report`,
+   `create_recommendations`, `close_visit`) is now created and completed at the right steps.
+6. **Confirm task skipped inside the confirmation window.** The generator always creates it,
+   clamping a past due date to today.
+7. **Complete/cancel recommendation buttons showed for all roles.** Now gated to the
+   maintenance engineer / admin (RLS already enforced it server-side).
+8. **Reschedule from advanced states was lossy.** Restricted to `scheduled`/`date_confirmed`.
+
+Supporting change: migration 015 adds a team-scoped `tasks` UPDATE policy so a visit's team
+can advance each other's tasks (needed for the close-visit sweep under the stricter RLS).
+
+**Known residual:** if a visit is rescheduled more than once, only the earliest original date
+is preserved for de-dup; pre-existing mid-reschedule rows aren't retroactively corrected.
+
+---
+
+*Originally generated 2026-05-28; updated to reflect migrations 008–015 and the lifecycle
+fixes. Inline line numbers were removed as the files have since changed; handler names are
+stable references.*
