@@ -910,7 +910,7 @@ export default function VisitDetailPage() {
       case 'date_confirmed':
         return { name: visit.vendor_coordinator?.full_name || 'Vendor Coordinator', role: 'Vendor Coordinator', action: 'to upload maintenance report' };
       case 'report_uploaded':
-        return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to create recommendations' };
+        return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to review maintenance report and create recommendations' };
       case 'recommendations_created':
         return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to complete or close visit' };
       case 'in_review': {
@@ -1347,7 +1347,7 @@ export default function VisitDetailPage() {
                   <span className="hidden sm:inline">Upload Report</span>
                   <span className="sm:hidden ml-1">Upload</span>
                 </Button>
-                {canConfirmDate && (
+                {canConfirmDate && visitReports.length === 0 && (
                   <Button variant="secondary" onClick={() => setNoReportModalOpen(true)} size="sm" className="text-xs sm:text-sm">
                     <FileX className="w-4 h-4 sm:mr-2" />
                     <span className="hidden sm:inline">No Report Available</span>
