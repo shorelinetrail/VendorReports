@@ -29,7 +29,7 @@ export default function SignupPage() {
 
         <div className="bg-white py-8 px-6 shadow-md rounded-lg text-center space-y-4">
           <p className="text-sm text-gray-600">
-            Accounts for Vendor Reports are created by an administrator. Please contact your
+            Accounts for VendorTrak are created by an administrator. Please contact your
             system administrator if you need access.
           </p>
           <Link href="/login">

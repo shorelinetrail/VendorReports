@@ -74,6 +74,12 @@ export interface MaintenanceVisit {
   technical_engineer_id: string;
   technical_engineer?: User;
   no_report_reason: string | null;
+  recommendations_complete: boolean;
+  no_recommendations_required: boolean;
+  no_recommendations_at: string | null;
+  no_recommendations_approved: boolean;
+  no_recommendations_reviewed_by_id: string | null;
+  no_recommendations_reviewed_at: string | null;
   created_at: string;
   updated_at: string;
 }

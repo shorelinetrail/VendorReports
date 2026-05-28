@@ -29,7 +29,7 @@ export default function Badge({ children, variant = 'default', size = 'md', clas
   };
 
   return (
-    <span className={`inline-flex items-center rounded-full font-medium ${variants[variant]} ${sizes[size]} ${className}`}>
+    <span className={`inline-flex items-center rounded-full font-medium capitalize ${variants[variant]} ${sizes[size]} ${className}`}>
       {children}
     </span>
   );

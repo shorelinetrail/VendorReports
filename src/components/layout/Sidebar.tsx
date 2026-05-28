@@ -50,7 +50,7 @@ export default function Sidebar({ onItemClick }: SidebarProps) {
         {/* Logo */}
         <div className="flex items-center h-16 px-6 border-b border-gray-800">
           <Building2 className="w-8 h-8 text-primary-500" />
-          <span className="ml-3 text-lg font-semibold">Vendor Reports</span>
+          <span className="ml-3 text-lg font-semibold">VendorTrak</span>
         </div>
         {/* Loading skeleton */}
         <nav className="flex-1 px-4 py-4 space-y-2">

@@ -1,5 +1,5 @@
 import { SupabaseClient } from '@supabase/supabase-js';
-import { format, addDays, addWeeks } from 'date-fns';
+import { format, addDays } from 'date-fns';
 import { TaskType } from '@/types/database';
 
 // Helpers for advancing the per-visit task chain as the visit moves through its
@@ -52,15 +52,15 @@ export async function createVisitTask(
   });
 }
 
-/** Create the "upload report" task for the coordinator, due N weeks after the visit. */
+/** Create the "upload report" task for the coordinator, due N days after the visit. */
 export async function createUploadReportTask(
   supabase: Client,
   visitId: string,
   coordinatorId: string | null | undefined,
   fromDate: Date,
 ): Promise<void> {
-  const weeks = await configInt(supabase, 'report_upload_weeks', 2);
-  await createVisitTask(supabase, visitId, 'upload_report', coordinatorId, addWeeks(fromDate, weeks));
+  const days = await configInt(supabase, 'report_upload_days', 14);
+  await createVisitTask(supabase, visitId, 'upload_report', coordinatorId, addDays(fromDate, days));
 }
 
 /** Create the "create recommendations" task for the maintenance engineer. */
@@ -71,6 +71,24 @@ export async function createRecommendationsTask(
 ): Promise<void> {
   const days = await configInt(supabase, 'recommendations_review_days', 7);
   await createVisitTask(supabase, visitId, 'create_recommendations', engineerId, addDays(new Date(), days));
+}
+
+/** Create a technical-review task for a specific recommendation, due N days out. */
+export async function createTechnicalReviewTask(
+  supabase: Client,
+  visitId: string,
+  technicalEngineerId: string | null | undefined,
+  recommendationId: string,
+): Promise<void> {
+  const days = await configInt(supabase, 'technical_review_days', 7);
+  await createVisitTask(
+    supabase,
+    visitId,
+    'technical_review',
+    technicalEngineerId,
+    addDays(new Date(), days),
+    `Review recommendation: ${recommendationId}`,
+  );
 }
 
 /** Create a "close visit" task for the maintenance engineer once the visit is ready to close. */

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check, RefreshCw, RotateCcw, Clock, FileX, Trash2, Users, Edit3 } from 'lucide-react';
+import { ArrowLeft, Calendar, Upload, FileText, Download, CheckCircle, XCircle, Plus, Check, RefreshCw, RotateCcw, Clock, FileX, Trash2, Users, Edit3, Send } from 'lucide-react';
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -11,6 +11,7 @@ import {
   createUploadReportTask,
   createRecommendationsTask,
   createCloseVisitTask,
+  createTechnicalReviewTask,
 } from '@/lib/workflow/tasks';
 import { MaintenanceVisit, Recommendation, Task, VisitStatus, RecommendationStatus, VisitReport, User, ReviewDecisionType } from '@/types/database';
 import Button from '@/components/ui/Button';
@@ -97,6 +98,8 @@ export default function VisitDetailPage() {
   const [sapDetailsModalOpen, setSapDetailsModalOpen] = useState(false);
   const [selectedRecForSap, setSelectedRecForSap] = useState<RecommendationWithCreator | null>(null);
   const [sapDetails, setSapDetails] = useState({ sap_notification_number: '', due_date: '' });
+  const [forwardModalOpen, setForwardModalOpen] = useState(false);
+  const [forwardData, setForwardData] = useState({ to_id: '', comment: '' });
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -394,62 +397,36 @@ export default function VisitDetailPage() {
     setSubmitting(true);
 
     try {
-      // Determine initial status based on whether technical review is required
-      const requiresReview = visit.routine?.requires_technical_review ?? true;
-      const initialStatus = requiresReview ? 'in_review' : 'open';
-
-      const { data: newRec, error } = await supabase.from('recommendations').insert({
+      // Recommendations are created as drafts. Nothing is sent to the technical
+      // engineer until the maintenance engineer explicitly clicks "All
+      // recommendations created" (see handleAllRecommendationsCreated).
+      const { error } = await supabase.from('recommendations').insert({
         visit_id: visitId,
         description: newRecommendation.description,
         sap_notification_number: newRecommendation.sap_notification_number || null,
         due_date: newRecommendation.due_date || null,
         created_by_id: userProfile.id,
-        status: initialStatus as RecommendationStatus,
-        sent_for_review: requiresReview,
+        status: 'open' as RecommendationStatus,
+        sent_for_review: false,
       }).select('id').single();
 
       if (error) throw error;
 
-      // Update visit status
-      if (recommendations.length === 0 || requiresReview) {
-        await supabase
-          .from('maintenance_visits')
-          .update({ status: requiresReview ? 'in_review' : 'recommendations_created' as VisitStatus })
-          .eq('id', visitId);
-      }
-
-      // If technical review is required, create a task for the technical engineer
-      if (requiresReview && visit.technical_engineer_id && newRec) {
-        const { data: configData } = await supabase
-          .from('system_config')
-          .select('config_value')
-          .eq('config_key', 'technical_review_days')
-          .single();
-
-        const reviewDays = parseInt(configData?.config_value || '7', 10);
-        const dueDate = new Date();
-        dueDate.setDate(dueDate.getDate() + reviewDays);
-
-        await supabase.from('tasks').insert({
-          visit_id: visitId,
-          task_type: 'technical_review',
-          assigned_to_id: visit.technical_engineer_id,
-          status: 'pending',
-          due_date: dueDate.toISOString().split('T')[0],
-          notes: `Review recommendation: ${newRec.id}`,
-        });
-      }
-
-      // The engineer has acted on the report; close the create-recommendations task.
-      await completeVisitTasks(supabase, visitId, ['create_recommendations']);
+      // Move the visit into the recommendations stage, and mark the set as not
+      // yet finalised (adding a recommendation re-opens the decision).
+      await supabase
+        .from('maintenance_visits')
+        .update({
+          status: 'recommendations_created' as VisitStatus,
+          recommendations_complete: false,
+          no_recommendations_required: false,
+        })
+        .eq('id', visitId);
 
       await fetchVisitData();
       setRecommendationModalOpen(false);
       setNewRecommendation({ description: '', sap_notification_number: '', due_date: '' });
-      setSuccess(requiresReview
-        ? 'Recommendation created and sent for technical review'
-        : 'Recommendation created successfully'
-      );
+      setSuccess('Recommendation added');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       setError(message);
@@ -458,51 +435,199 @@ export default function VisitDetailPage() {
     }
   };
 
-  const handleSendForReview = async (recommendationId: string) => {
+  // Maintenance engineer finalises the recommendation set. Only now (if the
+  // routine requires it) is the work sent to the technical engineer.
+  const handleAllRecommendationsCreated = async () => {
+    if (!visit) return;
+    if (!confirm('Confirm you have created all recommendations for this visit?')) return;
+
+    setError(null);
+    setSuccess(null);
+    setSubmitting(true);
+
     try {
-      const { error } = await supabase
-        .from('recommendations')
-        .update({
-          sent_for_review: true,
-          status: 'in_review' as RecommendationStatus,
-        })
-        .eq('id', recommendationId);
+      const requiresReview = visit.routine?.requires_technical_review ?? true;
+      const toSend = recommendations.filter(r => r.status === 'open' && !r.sent_for_review);
 
-      if (error) throw error;
+      if (requiresReview && toSend.length > 0) {
+        for (const rec of toSend) {
+          await supabase
+            .from('recommendations')
+            .update({ sent_for_review: true, status: 'in_review' as RecommendationStatus })
+            .eq('id', rec.id);
+          await createTechnicalReviewTask(supabase, visitId, visit.technical_engineer_id, rec.id);
+        }
+      }
 
-      // Update visit status
       await supabase
         .from('maintenance_visits')
-        .update({ status: 'in_review' as VisitStatus })
+        .update({
+          status: (requiresReview && toSend.length > 0 ? 'in_review' : 'recommendations_created') as VisitStatus,
+          recommendations_complete: true,
+        })
         .eq('id', visitId);
 
-      // Create a task for the technical engineer to review
-      if (visit?.technical_engineer_id) {
-        // Get the technical review days setting
-        const { data: configData } = await supabase
-          .from('system_config')
-          .select('config_value')
-          .eq('config_key', 'technical_review_days')
-          .single();
+      await completeVisitTasks(supabase, visitId, ['create_recommendations']);
 
-        const reviewDays = parseInt(configData?.config_value || '7', 10);
-        const dueDate = new Date();
-        dueDate.setDate(dueDate.getDate() + reviewDays);
+      await fetchVisitData();
+      setSuccess(requiresReview && toSend.length > 0
+        ? 'Recommendations finalised and sent for technical review'
+        : 'Recommendations finalised');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
-        await supabase.from('tasks').insert({
-          visit_id: visitId,
-          task_type: 'technical_review',
-          assigned_to_id: visit.technical_engineer_id,
-          status: 'pending',
-          due_date: dueDate.toISOString().split('T')[0],
-          notes: `Review recommendation: ${recommendationId}`,
-        });
+  // Maintenance engineer declares that no recommendations are required.
+  const handleNoRecommendationsRequired = async () => {
+    if (!visit) return;
+    const requiresReview = visit.routine?.requires_technical_review ?? true;
+    const message = requiresReview
+      ? 'Declare that no recommendations are required? This will be sent to the technical engineer to approve.'
+      : 'Declare that no recommendations are required?';
+    if (!confirm(message)) return;
+
+    setError(null);
+    setSuccess(null);
+    setSubmitting(true);
+
+    try {
+      await supabase
+        .from('maintenance_visits')
+        .update({
+          status: (requiresReview ? 'in_review' : 'recommendations_created') as VisitStatus,
+          recommendations_complete: true,
+          no_recommendations_required: true,
+          no_recommendations_at: new Date().toISOString(),
+          no_recommendations_approved: !requiresReview,
+        })
+        .eq('id', visitId);
+
+      await completeVisitTasks(supabase, visitId, ['create_recommendations']);
+
+      if (requiresReview) {
+        await createTechnicalReviewTask(supabase, visitId, visit.technical_engineer_id, 'none');
       }
 
       await fetchVisitData();
+      setSuccess(requiresReview
+        ? 'Sent to the technical engineer to approve that no recommendations are required'
+        : 'Recorded: no recommendations required');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Technical engineer approves the "no recommendations required" declaration.
+  const handleApproveNoRecommendations = async () => {
+    if (!visit || !userProfile) return;
+    setSubmitting(true);
+    try {
+      await supabase
+        .from('maintenance_visits')
+        .update({
+          status: 'recommendations_created' as VisitStatus,
+          no_recommendations_approved: true,
+          no_recommendations_reviewed_by_id: userProfile.id,
+          no_recommendations_reviewed_at: new Date().toISOString(),
+        })
+        .eq('id', visitId);
+
+      await completeVisitTasks(supabase, visitId, ['technical_review']);
+      await createCloseVisitTask(supabase, visitId, visit.maintenance_engineer_id);
+      await fetchVisitData();
+      setSuccess('Approved: no recommendations required');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       alert(message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Technical engineer rejects the declaration; sends it back to the engineer.
+  const handleRejectNoRecommendations = async () => {
+    if (!visit || !userProfile) return;
+    if (!confirm('Reject and send back for recommendations to be created?')) return;
+    setSubmitting(true);
+    try {
+      await supabase
+        .from('maintenance_visits')
+        .update({
+          status: 'report_uploaded' as VisitStatus,
+          recommendations_complete: false,
+          no_recommendations_required: false,
+          no_recommendations_reviewed_by_id: userProfile.id,
+          no_recommendations_reviewed_at: new Date().toISOString(),
+        })
+        .eq('id', visitId);
+
+      await completeVisitTasks(supabase, visitId, ['technical_review']);
+      await createRecommendationsTask(supabase, visitId, visit.maintenance_engineer_id);
+      await fetchVisitData();
+      setSuccess('Sent back to the maintenance engineer to create recommendations');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      alert(message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Maintenance engineer forwards the "review report & create recommendations"
+  // step to another engineer, with a comment.
+  const handleForwardRecommendations = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!visit || !forwardData.to_id) return;
+
+    setError(null);
+    setSuccess(null);
+    setSubmitting(true);
+
+    try {
+      const note = `Forwarded by ${userProfile?.full_name || 'maintenance engineer'}${forwardData.comment ? `: ${forwardData.comment}` : ''}`;
+
+      // Reassign (or create) the create-recommendations task BEFORE changing the
+      // visit's assigned engineer, so the current user still passes RLS.
+      const { data: openTasks } = await supabase
+        .from('tasks')
+        .select('id')
+        .eq('visit_id', visitId)
+        .eq('task_type', 'create_recommendations')
+        .in('status', ['pending', 'in_progress', 'overdue']);
+
+      if (openTasks && openTasks.length > 0) {
+        await supabase
+          .from('tasks')
+          .update({ assigned_to_id: forwardData.to_id, notes: note })
+          .in('id', openTasks.map((t: { id: string }) => t.id));
+      } else {
+        await createRecommendationsTask(supabase, visitId, forwardData.to_id);
+      }
+
+      const { error: updateError } = await supabase
+        .from('maintenance_visits')
+        .update({ maintenance_engineer_id: forwardData.to_id })
+        .eq('id', visitId);
+
+      if (updateError) throw updateError;
+
+      await fetchVisitData();
+      setForwardModalOpen(false);
+      const toName = users.find(u => u.id === forwardData.to_id)?.full_name || 'selected user';
+      setForwardData({ to_id: '', comment: '' });
+      setSuccess(`Forwarded to ${toName}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      setError(message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -629,21 +754,26 @@ export default function VisitDetailPage() {
     setSubmitting(true);
 
     try {
+      // Providing the requested SAP notification IS the action, so completing
+      // the recommendation here removes the redundant separate "complete" step.
       const { error: updateError } = await supabase
         .from('recommendations')
         .update({
           sap_notification_number: sapDetails.sap_notification_number,
           due_date: sapDetails.due_date,
+          status: 'completed' as RecommendationStatus,
+          completed_at: new Date().toISOString(),
         })
         .eq('id', selectedRecForSap.id);
 
       if (updateError) throw updateError;
 
+      await maybeQueueCloseTask(selectedRecForSap.id);
       await fetchVisitData();
       setSapDetailsModalOpen(false);
       setSelectedRecForSap(null);
       setSapDetails({ sap_notification_number: '', due_date: '' });
-      setSuccess('SAP details saved successfully');
+      setSuccess('SAP notification recorded and recommendation completed');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       setError(message);
@@ -912,8 +1042,15 @@ export default function VisitDetailPage() {
       case 'report_uploaded':
         return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to review maintenance report and create recommendations' };
       case 'recommendations_created':
+        if (!visit.recommendations_complete) {
+          return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to finalise recommendations (all created, or none required)' };
+        }
         return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to complete or close visit' };
       case 'in_review': {
+        // A "no recommendations required" declaration awaiting approval.
+        if (visit.no_recommendations_required && !visit.no_recommendations_approved) {
+          return { name: visit.technical_engineer?.full_name || 'Technical Engineer', role: 'Technical Engineer', action: 'to approve that no recommendations are required' };
+        }
         // Only genuinely waiting on the technical engineer if a recommendation
         // is still awaiting review. Once every recommendation has been reviewed,
         // the ball is back with the maintenance engineer to action approved
@@ -927,7 +1064,7 @@ export default function VisitDetailPage() {
       default:
         return null;
     }
-  }, [visit?.status, visit?.vendor_coordinator?.full_name, visit?.maintenance_engineer?.full_name, visit?.technical_engineer?.full_name, recommendations]);
+  }, [visit?.status, visit?.recommendations_complete, visit?.no_recommendations_required, visit?.no_recommendations_approved, visit?.vendor_coordinator?.full_name, visit?.maintenance_engineer?.full_name, visit?.technical_engineer?.full_name, recommendations]);
 
   // Memoized status variant helper
   const getStatusVariant = useCallback((status: string): 'pending' | 'in_progress' | 'completed' | 'cancelled' => {
@@ -946,7 +1083,11 @@ export default function VisitDetailPage() {
   }, []);
 
   // Memoized permission checks
-  const { canConfirmDate, canUploadReport, canCreateRecommendation, canReview, canReschedule, canCloseVisit, canReopenVisit, hasReports } = useMemo(() => {
+  const {
+    canConfirmDate, canUploadReport, canCreateRecommendation, canReview, canReschedule,
+    canCloseVisit, canReopenVisit, hasReports, canFinalizeRecommendations,
+    canDeclareNoRecs, canApproveNoRecs, canForwardRecommendations,
+  } = useMemo(() => {
     if (!visit) {
       return {
         canConfirmDate: false,
@@ -957,6 +1098,10 @@ export default function VisitDetailPage() {
         canReschedule: false,
         canCloseVisit: false,
         canReopenVisit: false,
+        canFinalizeRecommendations: false,
+        canDeclareNoRecs: false,
+        canApproveNoRecs: false,
+        canForwardRecommendations: false,
       };
     }
 
@@ -967,8 +1112,12 @@ export default function VisitDetailPage() {
     const isNotClosed = visit.status !== 'completed' && visit.status !== 'cancelled';
 
     const _hasReports = visitReports.length > 0 || !!visit.no_report_reason;
-    // No recommendation is still awaiting action (true when there are none).
-    const noOpenRecs = recommendations.every(r => r.status === 'completed' || r.status === 'cancelled');
+    const reqReview = visit.routine?.requires_technical_review ?? true;
+    const hasRecs = recommendations.length > 0;
+    // Every recommendation resolved (true when there are none).
+    const recsResolved = recommendations.every(r => r.status === 'completed' || r.status === 'cancelled');
+    // The engineer is still in the "create recommendations" phase.
+    const inRecPhase = (visit.status === 'report_uploaded' || visit.status === 'recommendations_created') && !visit.no_recommendations_required;
 
     return {
       canConfirmDate: isVendorCoord || isAdmin,
@@ -976,13 +1125,22 @@ export default function VisitDetailPage() {
       // or an admin may upload a report; engineers just aren't assigned a task.
       canUploadReport: (isVendorCoord || isMaintEng || isTechEng || isAdmin) && (visit.status === 'date_confirmed' || (visitReports.length > 0 && isNotClosed)),
       hasReports: _hasReports,
-      canCreateRecommendation: (isMaintEng || isAdmin) && _hasReports && isNotClosed,
+      canCreateRecommendation: (isMaintEng || isAdmin) && _hasReports && isNotClosed && !visit.no_recommendations_required,
       canReview: isTechEng || isAdmin,
       // Reschedule only makes sense before a report exists for the visit.
       canReschedule: (isVendorCoord || isAdmin) && (visit.status === 'scheduled' || visit.status === 'date_confirmed'),
-      // Closable once a report (or no-report reason) is recorded and nothing is
-      // left open — including the common case of a visit with no recommendations.
-      canCloseVisit: (isMaintEng || isAdmin) && isNotClosed && _hasReports && noOpenRecs,
+      // "All recommendations created": at least one recommendation, not yet finalised.
+      canFinalizeRecommendations: (isMaintEng || isAdmin) && _hasReports && inRecPhase && hasRecs && !visit.recommendations_complete,
+      // "No recommendations required": no recommendations yet, not already declared.
+      canDeclareNoRecs: (isMaintEng || isAdmin) && _hasReports && inRecPhase && !hasRecs && !visit.recommendations_complete,
+      // Forward the create-recommendations step to another engineer.
+      canForwardRecommendations: (isMaintEng || isAdmin) && _hasReports && inRecPhase,
+      // Technical engineer approves/rejects a "no recommendations required" declaration.
+      canApproveNoRecs: (isTechEng || isAdmin) && isNotClosed && reqReview && visit.no_recommendations_required && !visit.no_recommendations_approved,
+      // Closable once finalised, a report exists, everything resolved, and (for
+      // a no-recs declaration under review) the technical engineer has approved.
+      canCloseVisit: (isMaintEng || isAdmin) && isNotClosed && _hasReports && visit.recommendations_complete && recsResolved
+        && (!visit.no_recommendations_required || !reqReview || visit.no_recommendations_approved),
       canReopenVisit: isAdmin && visit.status === 'completed',
     };
   }, [visit, visitReports.length, recommendations, userProfile?.id, hasRole]);
@@ -1035,6 +1193,18 @@ export default function VisitDetailPage() {
     // No report reason
     if (visit.no_report_reason && visitReports.length === 0) {
       items.push({ date: visit.updated_at, event: 'No report available', details: visit.no_report_reason, by: coordinatorName });
+    }
+
+    // No recommendations required (declaration + technical approval/rejection)
+    if (visit.no_recommendations_at) {
+      items.push({ date: visit.no_recommendations_at, event: 'No recommendations required', by: engineerName });
+    }
+    if (visit.no_recommendations_reviewed_at) {
+      items.push({
+        date: visit.no_recommendations_reviewed_at,
+        event: visit.no_recommendations_approved ? 'No recommendations approved' : 'No recommendations rejected',
+        by: visit.technical_engineer?.full_name,
+      });
     }
 
     // Recommendations
@@ -1363,6 +1533,41 @@ export default function VisitDetailPage() {
                 <span className="sm:hidden ml-1">Add Rec.</span>
               </Button>
             )}
+            {canFinalizeRecommendations && (
+              <Button onClick={handleAllRecommendationsCreated} size="sm" className="bg-green-600 hover:bg-green-700 text-xs sm:text-sm">
+                <Check className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">All Recommendations Created</span>
+                <span className="sm:hidden ml-1">All Created</span>
+              </Button>
+            )}
+            {canDeclareNoRecs && (
+              <Button variant="secondary" onClick={handleNoRecommendationsRequired} size="sm" className="text-xs sm:text-sm">
+                <FileX className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">No Recommendations Required</span>
+                <span className="sm:hidden ml-1">None Required</span>
+              </Button>
+            )}
+            {canForwardRecommendations && (
+              <Button variant="secondary" onClick={() => { setForwardData({ to_id: '', comment: '' }); setError(null); setSuccess(null); setForwardModalOpen(true); }} size="sm" className="text-xs sm:text-sm">
+                <Send className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Forward</span>
+                <span className="sm:hidden ml-1">Forward</span>
+              </Button>
+            )}
+            {canApproveNoRecs && (
+              <>
+                <Button onClick={handleApproveNoRecommendations} size="sm" className="bg-green-600 hover:bg-green-700 text-xs sm:text-sm">
+                  <CheckCircle className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Approve — No Recommendations</span>
+                  <span className="sm:hidden ml-1">Approve</span>
+                </Button>
+                <Button variant="secondary" onClick={handleRejectNoRecommendations} size="sm" className="text-xs sm:text-sm">
+                  <XCircle className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Reject</span>
+                  <span className="sm:hidden ml-1">Reject</span>
+                </Button>
+              </>
+            )}
             {canReschedule && (
               <Button variant="secondary" onClick={() => setRescheduleModalOpen(true)} size="sm" className="text-xs sm:text-sm">
                 <RefreshCw className="w-4 h-4 sm:mr-2" />
@@ -1445,33 +1650,22 @@ export default function VisitDetailPage() {
                       <span>By {rec.created_by?.full_name}</span>
                     </div>
                     <div className="flex items-center justify-end gap-1 pt-1">
-                      {rec.status === 'open' && !rec.sent_for_review && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
-                        <Button variant="ghost" size="sm" onClick={() => handleSendForReview(rec.id)} className="h-7 px-2 text-[10px]">
-                          <FileText className="w-3 h-3 text-blue-500 mr-1" />Review
-                        </Button>
-                      )}
                       {rec.sent_for_review && rec.status === 'in_review' && canReview && (
                         <Button variant="ghost" size="sm" onClick={() => { setSelectedRecommendation(rec); setReviewModalOpen(true); }} className="h-7 px-2 text-[10px]">
                           <FileText className="w-3 h-3 text-purple-500 mr-1" />Review
                         </Button>
                       )}
-                      {rec.status === 'approved' && rec.review_decision === 'request_sap' && !rec.sap_notification_number && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
+                      {rec.status === 'approved' && rec.review_decision === 'request_sap' && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
                         <Button variant="ghost" size="sm" onClick={() => openSapDetailsModal(rec)} className="h-7 px-2 text-[10px] text-amber-600">
                           <Edit3 className="w-3 h-3 mr-1" />SAP
                         </Button>
                       )}
-                      {(rec.status === 'open' || rec.status === 'approved') && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
+                      {(rec.status === 'open' || (rec.status === 'approved' && rec.review_decision !== 'request_sap')) && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
                         <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleCompleteRecommendation(rec.id)}
-                            disabled={rec.review_decision === 'request_sap' && !rec.sap_notification_number}
-                            className="h-7 w-7 p-0"
-                          >
-                            <CheckCircle className={`w-4 h-4 ${rec.review_decision === 'request_sap' && !rec.sap_notification_number ? 'text-gray-300' : 'text-green-500'}`} />
+                          <Button variant="ghost" size="sm" onClick={() => handleCompleteRecommendation(rec.id)} className="h-7 w-7 p-0" title="Mark complete">
+                            <CheckCircle className="w-4 h-4 text-green-500" />
                           </Button>
-                          <Button variant="ghost" size="sm" onClick={() => handleCancelRecommendation(rec.id)} className="h-7 w-7 p-0">
+                          <Button variant="ghost" size="sm" onClick={() => handleCancelRecommendation(rec.id)} className="h-7 w-7 p-0" title="Cancel">
                             <XCircle className="w-4 h-4 text-red-500" />
                           </Button>
                         </>
@@ -1533,16 +1727,6 @@ export default function VisitDetailPage() {
                         <TableCell>{rec.created_by?.full_name}</TableCell>
                         <TableCell align="right">
                           <div className="flex items-center justify-end space-x-2">
-                            {rec.status === 'open' && !rec.sent_for_review && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleSendForReview(rec.id)}
-                                title="Send for Review"
-                              >
-                                <FileText className="w-4 h-4 text-blue-500" />
-                              </Button>
-                            )}
                             {rec.sent_for_review && rec.status === 'in_review' && canReview && (
                               <Button
                                 variant="ghost"
@@ -1556,27 +1740,26 @@ export default function VisitDetailPage() {
                                 <FileText className="w-4 h-4 text-purple-500" />
                               </Button>
                             )}
-                            {rec.status === 'approved' && rec.review_decision === 'request_sap' && !rec.sap_notification_number && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
+                            {rec.status === 'approved' && rec.review_decision === 'request_sap' && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
                               <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => openSapDetailsModal(rec)}
-                                title="Add SAP Details (Required)"
+                                title="Record SAP notification (completes this recommendation)"
                                 className="text-amber-600"
                               >
                                 <Edit3 className="w-4 h-4" />
                               </Button>
                             )}
-                            {(rec.status === 'open' || rec.status === 'approved') && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
+                            {(rec.status === 'open' || (rec.status === 'approved' && rec.review_decision !== 'request_sap')) && (userProfile?.id === visit.maintenance_engineer_id || hasRole('admin')) && (
                               <>
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => handleCompleteRecommendation(rec.id)}
-                                  title={rec.review_decision === 'request_sap' && !rec.sap_notification_number ? 'Add SAP details first' : 'Mark Complete'}
-                                  disabled={rec.review_decision === 'request_sap' && !rec.sap_notification_number}
+                                  title="Mark Complete"
                                 >
-                                  <CheckCircle className={`w-4 h-4 ${rec.review_decision === 'request_sap' && !rec.sap_notification_number ? 'text-gray-300' : 'text-green-500'}`} />
+                                  <CheckCircle className="w-4 h-4 text-green-500" />
                                 </Button>
                                 <Button
                                   variant="ghost"
@@ -1771,9 +1954,9 @@ export default function VisitDetailPage() {
             required
             placeholder="Select your decision"
             options={[
-              { value: 'no_action', label: 'No Further Action Required' },
-              { value: 'request_sap', label: 'Request SAP Notification' },
-              { value: 'other_action', label: 'Other Action Required' },
+              { value: 'no_action', label: 'No further action required' },
+              { value: 'request_sap', label: 'Request SAP notification' },
+              { value: 'other_action', label: 'Other action required' },
             ]}
           />
 
@@ -1801,11 +1984,11 @@ export default function VisitDetailPage() {
           )}
 
           <Textarea
-            label={reviewDecision === 'no_action' ? 'Justification' : 'Comments'}
+            label={reviewDecision === 'no_action' ? 'Justification' : 'Comments (optional)'}
             name="review_response"
             value={reviewResponse}
             onChange={(e) => setReviewResponse(e.target.value)}
-            required
+            required={reviewDecision === 'no_action'}
             placeholder={reviewDecision === 'no_action'
               ? 'Provide justification for no further action...'
               : 'Add any additional comments...'}
@@ -2006,6 +2189,52 @@ export default function VisitDetailPage() {
             </Button>
             <Button type="submit" loading={submitting} className="w-full sm:w-auto">
               Save SAP Details
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Forward Recommendations Step Modal */}
+      <Modal
+        isOpen={forwardModalOpen}
+        onClose={() => setForwardModalOpen(false)}
+        title="Forward to Another Engineer"
+      >
+        <form onSubmit={handleForwardRecommendations} className="space-y-4">
+          {error && <Alert variant="error">{error}</Alert>}
+          {success && <Alert variant="success">{success}</Alert>}
+
+          <p className="text-sm text-gray-600">
+            Forward the &quot;review report &amp; create recommendations&quot; step to another engineer. They become the assigned maintenance engineer for this visit.
+          </p>
+
+          <Select
+            label="Forward To"
+            name="forward_to"
+            value={forwardData.to_id}
+            onChange={(e) => setForwardData({ ...forwardData, to_id: e.target.value })}
+            required
+            placeholder="Select an engineer"
+            options={users
+              .filter(u => (u.role === 'maintenance_engineer' || u.role === 'admin') && u.is_active !== false && u.id !== visit.maintenance_engineer_id)
+              .map(u => ({ value: u.id, label: `${u.full_name} (${u.role.replace(/_/g, ' ')})` }))}
+          />
+
+          <Textarea
+            label="Comment (optional)"
+            name="forward_comment"
+            value={forwardData.comment}
+            onChange={(e) => setForwardData({ ...forwardData, comment: e.target.value })}
+            placeholder="Add a note for the person you're forwarding to..."
+            rows={3}
+          />
+
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 pt-4 border-t">
+            <Button type="button" variant="secondary" onClick={() => setForwardModalOpen(false)} className="w-full sm:w-auto">
+              Cancel
+            </Button>
+            <Button type="submit" loading={submitting} disabled={!forwardData.to_id} className="w-full sm:w-auto">
+              Forward
             </Button>
           </div>
         </form>

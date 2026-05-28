@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Vendor Maintenance Tracker',
+  title: 'VendorTrak',
   description: 'Track and manage vendor maintenance reports and schedules',
 };
 

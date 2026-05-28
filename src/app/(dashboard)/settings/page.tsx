@@ -12,21 +12,21 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 
 interface ConfigSettings {
   visit_confirmation_days: string;
-  report_upload_weeks: string;
+  report_upload_days: string;
   recommendations_review_days: string;
   technical_review_days: string;
 }
 
 const configDescriptions: Record<string, string> = {
   visit_confirmation_days: 'Days before visit due date for vendor coordinator to confirm the visit',
-  report_upload_weeks: 'Weeks after visit date for report upload deadline',
+  report_upload_days: 'Days after visit date for report upload deadline',
   recommendations_review_days: 'Days for maintenance engineer to create recommendations after report upload',
   technical_review_days: 'Days for technical engineer to complete review after being assigned',
 };
 
 const configLabels: Record<string, string> = {
   visit_confirmation_days: 'Visit Confirmation Days',
-  report_upload_weeks: 'Report Upload Weeks',
+  report_upload_days: 'Report Upload Days',
   recommendations_review_days: 'Recommendations Review Days',
   technical_review_days: 'Technical Review Days',
 };
@@ -35,7 +35,7 @@ export default function SettingsPage() {
   const { realUserProfile } = useAuth();
   const [config, setConfig] = useState<ConfigSettings>({
     visit_confirmation_days: '14',
-    report_upload_weeks: '2',
+    report_upload_days: '14',
     recommendations_review_days: '7',
     technical_review_days: '7',
   });
@@ -128,7 +128,7 @@ export default function SettingsPage() {
   const handleReset = () => {
     setConfig({
       visit_confirmation_days: '14',
-      report_upload_weeks: '2',
+      report_upload_days: '14',
       recommendations_review_days: '7',
       technical_review_days: '7',
     });
@@ -267,7 +267,7 @@ export default function SettingsPage() {
               <div className="ml-4">
                 <p className="font-medium text-gray-900">Report Upload</p>
                 <p className="text-sm text-gray-500">
-                  Vendor Coordinator uploads the maintenance report within {config.report_upload_weeks} weeks after the visit.
+                  Vendor Coordinator uploads the maintenance report within {config.report_upload_days} days after the visit.
                 </p>
               </div>
             </div>

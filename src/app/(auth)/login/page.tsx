@@ -102,7 +102,7 @@ export default function LoginPage() {
           <div className="flex justify-center">
             <Building2 className="w-12 h-12 text-primary-600" />
           </div>
-          <h2 className="mt-4 text-3xl font-bold text-gray-900">Vendor Reports</h2>
+          <h2 className="mt-4 text-3xl font-bold text-gray-900">VendorTrak</h2>
           <p className="mt-2 text-sm text-gray-600">Sign in to your account</p>
         </div>
 
