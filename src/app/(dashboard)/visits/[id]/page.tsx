@@ -909,12 +909,21 @@ export default function VisitDetailPage() {
         return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to create recommendations' };
       case 'recommendations_created':
         return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to complete or close visit' };
-      case 'in_review':
-        return { name: visit.technical_engineer?.full_name || 'Technical Engineer', role: 'Technical Engineer', action: 'to review recommendations' };
+      case 'in_review': {
+        // Only genuinely waiting on the technical engineer if a recommendation
+        // is still awaiting review. Once every recommendation has been reviewed,
+        // the ball is back with the maintenance engineer to action approved
+        // recommendations and close the visit.
+        const awaitingReview = recommendations.some(r => r.status === 'in_review');
+        if (awaitingReview) {
+          return { name: visit.technical_engineer?.full_name || 'Technical Engineer', role: 'Technical Engineer', action: 'to review recommendations' };
+        }
+        return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to complete approved recommendations and close the visit' };
+      }
       default:
         return null;
     }
-  }, [visit?.status, visit?.vendor_coordinator?.full_name, visit?.maintenance_engineer?.full_name, visit?.technical_engineer?.full_name]);
+  }, [visit?.status, visit?.vendor_coordinator?.full_name, visit?.maintenance_engineer?.full_name, visit?.technical_engineer?.full_name, recommendations]);
 
   // Memoized status variant helper
   const getStatusVariant = useCallback((status: string): 'pending' | 'in_progress' | 'completed' | 'cancelled' => {
