@@ -84,6 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email: authUser.email || '',
       full_name: metadata?.full_name || metadata?.name || authUser.email?.split('@')[0] || 'User',
       role: (metadata?.role as UserRole) || 'vendor_coordinator',
+      is_active: true,
       created_at: authUser.created_at,
       updated_at: authUser.updated_at || authUser.created_at,
     };
