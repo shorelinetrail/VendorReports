@@ -72,7 +72,7 @@ Routines define recurring maintenance plans (interval + start date + a "call hor
 
 ### Reports / file storage
 
-Maintenance reports are stored in a private Supabase Storage bucket named `reports` (created in migration 001, with RLS allowing authenticated upload/view and admin delete). File metadata is tracked in the `visit_reports` table.
+Maintenance reports are stored in a private Supabase Storage bucket named `reports` (created in migration 001). Object keys are `<visit_id>/<timestamp>.<ext>`; the storage INSERT policy (migration 014) restricts uploads to the visit's assigned vendor coordinator or an admin, and the bucket enforces a 10 MB limit and a document-only MIME allow-list. View is open to authenticated users; delete is admin-only. File metadata is tracked in the `visit_reports` table.
 
 ## Conventions
 

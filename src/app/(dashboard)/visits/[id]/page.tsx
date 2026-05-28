@@ -258,8 +258,9 @@ export default function VisitDetailPage() {
 
     try {
       const fileExt = file.name.split('.').pop();
-      const storedFileName = `${visitId}-${Date.now()}.${fileExt}`;
-      const filePath = `reports/${storedFileName}`;
+      // First path segment is the visit id so the storage RLS policy can scope
+      // uploads to the visit's assigned coordinator.
+      const filePath = `${visitId}/${Date.now()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
         .from('reports')

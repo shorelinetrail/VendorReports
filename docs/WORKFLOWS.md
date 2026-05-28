@@ -194,9 +194,10 @@ Ordered roughly by impact. Items are marked **[verified in code]** where confirm
 > `close_visit` added to the enum (#6), "Completed This Month" now computed (#7), visit-date
 > entry moved to a modal (#8), legacy report columns dropped / multi-report fully on
 > `visit_reports` (#10), soft-delete for routines/users/vendors (#11), role-filtered
-> assignment dropdowns (#12), and config min/max validation in the form + a DB trigger (#13).
-> Still open: **#5 (notifications/email)** and **#9 (reassign does not move open tasks)**,
-> plus the configuration items #14/#15.
+> assignment dropdowns (#12), config min/max validation in the form + a DB trigger (#13),
+> and scoped report-storage uploads with bucket file-type/size limits (#15, migration 014).
+> Still open: **#5 (notifications/email)**, **#9 (reassign does not move open tasks)**, and
+> the configuration item #14 (email-confirmation policy).
 
 ### Security / integrity
 
