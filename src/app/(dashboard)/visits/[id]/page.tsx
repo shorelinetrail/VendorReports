@@ -1102,11 +1102,15 @@ export default function VisitDetailPage() {
         return { name: visit.vendor_coordinator?.full_name || 'Vendor Coordinator', role: 'Vendor Coordinator', action: 'to upload maintenance report' };
       case 'report_uploaded':
         return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to review maintenance report and create recommendations' };
-      case 'recommendations_created':
+      case 'recommendations_created': {
+        const eng = { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer' };
         if (!visit.recommendations_complete) {
-          return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to confirm all recommendations have been created' };
+          return { ...eng, action: 'to confirm all recommendations have been created' };
         }
-        return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to complete or close visit' };
+        // Finalised: anything still open to action, or just close.
+        const hasOpenRecs = recommendations.some(r => r.status === 'open' || r.status === 'approved');
+        return { ...eng, action: hasOpenRecs ? 'to complete the recommendations and close the visit' : 'to close the visit' };
+      }
       case 'in_review': {
         // A "no recommendations required" declaration awaiting approval.
         if (visit.no_recommendations_required && !visit.no_recommendations_approved) {
@@ -1114,17 +1118,18 @@ export default function VisitDetailPage() {
         }
         // Only genuinely waiting on the technical engineer if a recommendation
         // is still awaiting review. Once every recommendation has been reviewed,
-        // the ball is back with the maintenance engineer to action approved
-        // recommendations and close the visit.
+        // the ball is back with the maintenance engineer.
         const awaitingReview = recommendations.some(r => r.status === 'in_review');
         if (awaitingReview) {
           return { name: visit.technical_engineer?.full_name || 'Technical Engineer', role: 'Technical Engineer', action: 'to review recommendations' };
         }
+        const eng = { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer' };
         const hasUnsentDrafts = recommendations.some(r => r.status === 'open' && !r.sent_for_review);
         if (hasUnsentDrafts) {
-          return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to finalise the newly added recommendations' };
+          return { ...eng, action: 'to finalise the newly added recommendations' };
         }
-        return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to complete approved recommendations and close the visit' };
+        const hasApproved = recommendations.some(r => r.status === 'approved');
+        return { ...eng, action: hasApproved ? 'to complete approved recommendations and close the visit' : 'to close the visit' };
       }
       default:
         return null;
