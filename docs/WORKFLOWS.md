@@ -376,6 +376,9 @@ recommendation phase plus several UX changes:
 - **SAP completes the recommendation.** Recording the requested SAP notification completes the
   recommendation in one step; the separate per-rec "send for review" and redundant "complete"
   actions were removed (sending now happens on finalise).
+- **Review gate enforced in the DB (migration 019).** A trigger on `recommendations` blocks a
+  direct `open` → `completed` transition when the routine requires technical review, so a draft
+  recommendation cannot bypass the technical engineer even outside the UI.
 - **Engineer uploads (migration 016).** Any assigned team member (or admin) may upload reports;
   only the coordinator is assigned an upload task. Storage + `visit_reports` RLS updated.
 - **Deadlines in days (migration 018).** `report_upload_weeks` replaced by `report_upload_days`
@@ -386,6 +389,6 @@ recommendation phase plus several UX changes:
 
 ---
 
-*Originally generated 2026-05-28; updated to reflect migrations 008–018, the lifecycle fixes,
+*Originally generated 2026-05-28; updated to reflect migrations 008–019, the lifecycle fixes,
 and the recommendation-phase finalisation flow. Inline line numbers were removed as the files
 have since changed; handler names are stable references.*
