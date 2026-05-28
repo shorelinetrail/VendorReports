@@ -1043,7 +1043,7 @@ export default function VisitDetailPage() {
         return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to review maintenance report and create recommendations' };
       case 'recommendations_created':
         if (!visit.recommendations_complete) {
-          return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to finalise recommendations (all created, or none required)' };
+          return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to confirm all recommendations have been created' };
         }
         return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to complete or close visit' };
       case 'in_review': {
