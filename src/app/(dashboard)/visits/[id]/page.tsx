@@ -1101,7 +1101,7 @@ export default function VisitDetailPage() {
       case 'date_confirmed':
         return { name: visit.vendor_coordinator?.full_name || 'Vendor Coordinator', role: 'Vendor Coordinator', action: 'to upload maintenance report' };
       case 'report_uploaded':
-        return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to review maintenance report and create recommendations' };
+        return { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer', action: 'to review maintenance report and create recommendations (or confirm none are required)' };
       case 'recommendations_created': {
         const eng = { name: visit.maintenance_engineer?.full_name || 'Maintenance Engineer', role: 'Maintenance Engineer' };
         if (!visit.recommendations_complete) {
