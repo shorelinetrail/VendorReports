@@ -61,7 +61,7 @@ A comprehensive system for tracking maintenance reports from various vendors, bu
 - **Database**: Supabase (PostgreSQL)
 - **Authentication**: Supabase Auth with Row Level Security
 - **File Storage**: Supabase Storage
-- **Charts**: Recharts
+- **Charts**: dependency-free inline SVG/HTML (`src/components/charts/`)
 - **Deployment**: Vercel
 
 ## Getting Started
@@ -84,10 +84,10 @@ cd vendor-reports
 npm install
 ```
 
-3. Create a Supabase project and run the migration:
+3. Create a Supabase project and run the migrations:
    - Go to your Supabase dashboard
    - Navigate to SQL Editor
-   - Run the contents of `supabase/migrations/001_initial_schema.sql`
+   - Run the files in `supabase/migrations/` in numeric order (001 → 015)
 
 4. Configure environment variables:
 ```bash
@@ -123,7 +123,9 @@ npm run dev
 - `maintenance_visits` - Individual visit records
 - `tasks` - Workflow tasks
 - `recommendations` - Action items from reports
+- `visit_reports` - Uploaded report files per visit
 - `system_config` - Configurable settings
+- `audit_log` - Append-only record of every write (via DB triggers)
 
 ### Row Level Security
 All tables have RLS policies enforcing:
