@@ -1,38 +1,32 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
-  format,
-  startOfMonth,
-  endOfMonth,
-  startOfWeek,
-  endOfWeek,
   addDays,
   addMonths,
-  subMonths,
-  isSameMonth,
+  endOfMonth,
+  endOfWeek,
+  format,
   isSameDay,
+  isSameMonth,
   isToday,
+  startOfMonth,
+  startOfWeek,
+  subMonths,
 } from 'date-fns';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import Button from './Button';
+import { asDate, VISIT_STATUS_LABELS } from '@/lib/labels';
+import type { VisitStatus } from '@/types/database';
 
 export interface CalendarEvent {
   id: string;
   date: string;
   title: string;
   subtitle?: string;
-  status: 'scheduled' | 'date_confirmed' | 'report_uploaded' | 'recommendations_created' | 'in_review' | 'completed' | 'cancelled';
+  status: VisitStatus;
 }
 
-interface CalendarProps {
-  events?: CalendarEvent[];
-  onDateClick?: (date: Date, events: CalendarEvent[]) => void;
-  onEventClick?: (event: CalendarEvent) => void;
-  selectedDate?: Date | null;
-}
-
-const statusColors: Record<string, string> = {
+const STATUS_COLORS: Record<VisitStatus, string> = {
   scheduled: 'bg-yellow-400',
   date_confirmed: 'bg-blue-400',
   report_uploaded: 'bg-blue-500',
@@ -42,161 +36,133 @@ const statusColors: Record<string, string> = {
   cancelled: 'bg-gray-400',
 };
 
+interface CalendarProps {
+  events?: CalendarEvent[];
+  onDateClick?: (date: Date, events: CalendarEvent[]) => void;
+  onEventClick?: (event: CalendarEvent) => void;
+  selectedDate?: Date | null;
+}
+
 export default function Calendar({ events = [], onDateClick, onEventClick, selectedDate }: CalendarProps) {
-  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [currentMonth, setCurrentMonth] = useState(() => new Date());
 
   const eventsByDate = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
-    events.forEach((event) => {
-      const dateKey = format(new Date(event.date), 'yyyy-MM-dd');
-      const existing = map.get(dateKey) || [];
-      existing.push(event);
-      map.set(dateKey, existing);
-    });
+    for (const event of events) {
+      const key = format(asDate(event.date), 'yyyy-MM-dd');
+      map.set(key, [...(map.get(key) ?? []), event]);
+    }
     return map;
   }, [events]);
 
-  const calendarDays = useMemo(() => {
-    const monthStart = startOfMonth(currentMonth);
-    const monthEnd = endOfMonth(monthStart);
-    const startDate = startOfWeek(monthStart, { weekStartsOn: 1 }); // Monday start
-    const endDate = endOfWeek(monthEnd, { weekStartsOn: 1 });
-
-    const days: Date[] = [];
-    let day = startDate;
-
-    while (day <= endDate) {
-      days.push(day);
-      day = addDays(day, 1);
-    }
-
-    return days;
+  const days = useMemo(() => {
+    const start = startOfWeek(startOfMonth(currentMonth), { weekStartsOn: 1 });
+    const end = endOfWeek(endOfMonth(currentMonth), { weekStartsOn: 1 });
+    const result: Date[] = [];
+    for (let day = start; day <= end; day = addDays(day, 1)) result.push(day);
+    return result;
   }, [currentMonth]);
 
-  const handlePrevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
-  const handleNextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
-  const handleToday = () => setCurrentMonth(new Date());
-
-  const handleDayClick = (day: Date) => {
-    const dateKey = format(day, 'yyyy-MM-dd');
-    const dayEvents = eventsByDate.get(dateKey) || [];
-    onDateClick?.(day, dayEvents);
-  };
-
-  const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
   return (
-    <div className="bg-white rounded-lg">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-gray-900">
-          {format(currentMonth, 'MMMM yyyy')}
-        </h2>
+    <div>
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-base font-semibold text-gray-900">{format(currentMonth, 'MMMM yyyy')}</h3>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" onClick={handlePrevMonth}>
-            <ChevronLeft className="w-4 h-4" />
-          </Button>
-          <Button variant="ghost" size="sm" onClick={handleToday}>
+          <button
+            type="button"
+            onClick={() => setCurrentMonth((m) => subMonths(m, 1))}
+            aria-label="Previous month"
+            className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setCurrentMonth(new Date())}
+            className="rounded-md px-2 py-1 text-sm font-medium text-gray-600 hover:bg-gray-100"
+          >
             Today
-          </Button>
-          <Button variant="ghost" size="sm" onClick={handleNextMonth}>
-            <ChevronRight className="w-4 h-4" />
-          </Button>
+          </button>
+          <button
+            type="button"
+            onClick={() => setCurrentMonth((m) => addMonths(m, 1))}
+            aria-label="Next month"
+            className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
         </div>
       </div>
 
-      {/* Week day headers */}
-      <div className="grid grid-cols-7 mb-2">
-        {weekDays.map((day) => (
-          <div
-            key={day}
-            className="text-center text-xs font-medium text-gray-500 py-2"
-          >
+      <div className="grid grid-cols-7 gap-px overflow-hidden rounded-lg border border-gray-200 bg-gray-200">
+        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
+          <div key={day} className="bg-gray-50 py-1.5 text-center text-xs font-medium text-gray-500">
             {day}
           </div>
         ))}
-      </div>
-
-      {/* Calendar grid */}
-      <div className="grid grid-cols-7 gap-1">
-        {calendarDays.map((day, idx) => {
-          const dateKey = format(day, 'yyyy-MM-dd');
-          const dayEvents = eventsByDate.get(dateKey) || [];
-          const isCurrentMonth = isSameMonth(day, currentMonth);
-          const isSelected = selectedDate && isSameDay(day, selectedDate);
-          const isTodayDate = isToday(day);
+        {days.map((day) => {
+          const key = format(day, 'yyyy-MM-dd');
+          const dayEvents = eventsByDate.get(key) ?? [];
+          const inMonth = isSameMonth(day, currentMonth);
+          const selected = selectedDate ? isSameDay(day, selectedDate) : false;
+          const today = isToday(day);
 
           return (
             <button
-              key={idx}
-              onClick={() => handleDayClick(day)}
-              className={`
-                relative min-h-[60px] sm:min-h-[80px] p-1 text-left border border-gray-100 rounded transition-colors
-                ${isCurrentMonth ? 'bg-white hover:bg-gray-50' : 'bg-gray-50 text-gray-400'}
-                ${isSelected ? 'ring-2 ring-primary-500 bg-primary-50' : ''}
-                ${isTodayDate ? 'border-primary-500' : ''}
-              `}
+              key={key}
+              type="button"
+              onClick={() => onDateClick?.(day, dayEvents)}
+              aria-label={`${format(day, 'MMMM d, yyyy')}${dayEvents.length ? `, ${dayEvents.length} visits` : ''}`}
+              className={`min-h-[72px] p-1 text-left align-top transition-colors ${
+                inMonth ? 'bg-white hover:bg-gray-50' : 'bg-gray-50 text-gray-400'
+              } ${selected ? 'bg-primary-50 ring-2 ring-inset ring-primary-500' : ''}`}
             >
               <span
-                className={`
-                  text-xs sm:text-sm font-medium
-                  ${isTodayDate ? 'bg-primary-600 text-white rounded-full w-6 h-6 flex items-center justify-center' : ''}
-                `}
+                className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs ${
+                  today ? 'bg-primary-600 font-semibold text-white' : ''
+                }`}
               >
                 {format(day, 'd')}
               </span>
-
-              {/* Event indicators */}
-              {dayEvents.length > 0 && (
-                <div className="mt-1 space-y-0.5">
-                  {dayEvents.slice(0, 3).map((event, eventIdx) => (
-                    <div
-                      key={event.id}
-                      onClick={(e) => {
+              <div className="mt-0.5 space-y-0.5">
+                {dayEvents.slice(0, 3).map((event) => (
+                  <span
+                    key={event.id}
+                    role="link"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEventClick?.(event);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
                         e.stopPropagation();
                         onEventClick?.(event);
-                      }}
-                      className={`
-                        ${statusColors[event.status] || 'bg-gray-400'}
-                        text-white text-[10px] sm:text-xs px-1 rounded truncate cursor-pointer
-                        hover:opacity-80 transition-opacity
-                      `}
-                      title={event.title}
-                    >
-                      <span className="hidden sm:inline">{event.title}</span>
-                      <span className="sm:hidden">&nbsp;</span>
-                    </div>
-                  ))}
-                  {dayEvents.length > 3 && (
-                    <div className="text-[10px] text-gray-500 px-1">
-                      +{dayEvents.length - 3} more
-                    </div>
-                  )}
-                </div>
-              )}
+                      }
+                    }}
+                    title={`${event.title} — ${VISIT_STATUS_LABELS[event.status]}`}
+                    className={`block truncate rounded px-1 text-[10px] leading-4 text-white ${STATUS_COLORS[event.status]}`}
+                  >
+                    <span className="hidden sm:inline">{event.title}</span>
+                    <span className="sm:hidden">&nbsp;</span>
+                  </span>
+                ))}
+                {dayEvents.length > 3 && (
+                  <span className="block px-1 text-[10px] text-gray-500">+{dayEvents.length - 3} more</span>
+                )}
+              </div>
             </button>
           );
         })}
       </div>
 
-      {/* Legend */}
-      <div className="mt-4 flex flex-wrap gap-3 text-xs">
-        <div className="flex items-center gap-1">
-          <div className="w-3 h-3 rounded bg-yellow-400"></div>
-          <span className="text-gray-600">Scheduled</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <div className="w-3 h-3 rounded bg-blue-400"></div>
-          <span className="text-gray-600">Confirmed</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <div className="w-3 h-3 rounded bg-purple-500"></div>
-          <span className="text-gray-600">In Review</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <div className="w-3 h-3 rounded bg-green-500"></div>
-          <span className="text-gray-600">Completed</span>
-        </div>
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+        {(Object.keys(STATUS_COLORS) as VisitStatus[]).map((status) => (
+          <span key={status} className="flex items-center gap-1.5 text-xs text-gray-500">
+            <span className={`h-2.5 w-2.5 rounded-sm ${STATUS_COLORS[status]}`} />
+            {VISIT_STATUS_LABELS[status]}
+          </span>
+        ))}
       </div>
     </div>
   );
