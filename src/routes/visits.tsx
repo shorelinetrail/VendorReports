@@ -191,7 +191,7 @@ async function loadVisit(c: Context<App>, id: string): Promise<VisitBundle | nul
 async function withVisit(
   c: Context<App>,
   check: (b: VisitBundle) => boolean,
-  action: (b: VisitBundle) => Promise<string>
+  action: (b: VisitBundle) => Promise<string | { message: string; redirect: string }>
 ): Promise<Response> {
   const id = c.req.param('id')!;
   // Recommendation/task actions are also triggered from list pages; go back to
@@ -209,7 +209,12 @@ async function withVisit(
     return c.redirect(back);
   }
   try {
-    flash(c, await action(bundle));
+    const result = await action(bundle);
+    if (typeof result === 'string') flash(c, result);
+    else {
+      flash(c, result.message);
+      back = result.redirect;
+    }
   } catch (err) {
     flash(c, err instanceof Error ? err.message : 'Something went wrong', 'err');
   }
@@ -402,7 +407,10 @@ routes.post('/:id/recommendations/:recId/review', async (c) => {
     }
     const visit = (await first<Visit>(db, 'SELECT * FROM visits WHERE id = ?', b.visit.id))!;
     await maybeCreateCloseTask(db, visit, actor(c));
-    return `Review submitted — ${REVIEW_DECISION_LABELS[decision as keyof typeof REVIEW_DECISION_LABELS].toLowerCase()}.`;
+    const message = `Review submitted — ${REVIEW_DECISION_LABELS[decision as keyof typeof REVIEW_DECISION_LABELS].toLowerCase()}.`;
+    // A no_action review can resolve the last recommendation too.
+    const unresolved = await first(db, "SELECT id FROM recommendations WHERE visit_id = ? AND status NOT IN ('completed', 'cancelled')", b.visit.id);
+    return unresolved ? message : { message, redirect: `/visits/${b.visit.id}?prompt-close=1` };
   });
 });
 
@@ -514,7 +522,9 @@ routes.post('/:id/recommendations/:recId/complete', async (c) => {
     const visit = (await first<Visit>(db, 'SELECT * FROM visits WHERE id = ?', b.visit.id))!;
     await maybeCreateCloseTask(db, visit, actor(c));
     const unresolved = await first(db, "SELECT id FROM recommendations WHERE visit_id = ? AND status NOT IN ('completed', 'cancelled')", b.visit.id);
-    return unresolved ? 'Recommendation completed.' : 'Recommendation completed — that was the last one, the visit is ready to close.';
+    return unresolved
+      ? 'Recommendation completed.'
+      : { message: 'Recommendation completed — that was the last one.', redirect: `/visits/${b.visit.id}?prompt-close=1` };
   });
 });
 
@@ -533,7 +543,9 @@ routes.post('/:id/recommendations/:recId/cancel', async (c) => {
     const visit = (await first<Visit>(db, 'SELECT * FROM visits WHERE id = ?', b.visit.id))!;
     await maybeCreateCloseTask(db, visit, actor(c));
     const unresolved = await first(db, "SELECT id FROM recommendations WHERE visit_id = ? AND status NOT IN ('completed', 'cancelled')", b.visit.id);
-    return unresolved ? 'Recommendation cancelled.' : 'Recommendation cancelled — that was the last one, the visit is ready to close.';
+    return unresolved
+      ? 'Recommendation cancelled.'
+      : { message: 'Recommendation cancelled — that was the last one.', redirect: `/visits/${b.visit.id}?prompt-close=1` };
   });
 });
 
@@ -631,6 +643,28 @@ const STEPS: { status: VisitStatus; label: string }[] = [
 
 interface Activity { date: string; event: string; details?: string }
 
+interface AuditEvent { table_name: string; old_data: string | null; new_data: string | null; created_at: string; actor_name: string | null }
+
+/** Reopen events only exist in the audit trail (reopening clears the completion timestamps). */
+function reopenActivity(auditRows: AuditEvent[]): Activity[] {
+  const items: Activity[] = [];
+  for (const row of auditRows) {
+    try {
+      const oldData = JSON.parse(row.old_data ?? '{}');
+      const newData = JSON.parse(row.new_data ?? '{}');
+      const by = row.actor_name ? ` by ${row.actor_name}` : '';
+      if (row.table_name === 'visits' && oldData.status === 'completed' && newData.status !== 'completed') {
+        items.push({ date: row.created_at, event: 'Visit reopened', details: `Reopened${by}` });
+      }
+      if (row.table_name === 'recommendations' &&
+          ['completed', 'cancelled'].includes(oldData.status) && ['open', 'approved'].includes(newData.status)) {
+        items.push({ date: row.created_at, event: 'Recommendation reopened', details: `${String(newData.description ?? '').slice(0, 60)}${by ? ` — reopened${by}` : ''}` });
+      }
+    } catch { /* skip malformed rows */ }
+  }
+  return items;
+}
+
 function buildActivity(b: VisitBundle): Activity[] {
   const items: Activity[] = [];
   const v = b.visit;
@@ -678,7 +712,17 @@ routes.get('/:id', async (c) => {
     maintEngineer: team.maintEngineer?.full_name,
     techEngineer: team.techEngineer?.full_name,
   });
-  const activity = buildActivity(bundle);
+  const auditRows = await all<AuditEvent>(
+    c.env.DB,
+    `SELECT a.table_name, a.old_data, a.new_data, a.created_at, u.full_name AS actor_name
+     FROM audit_log a LEFT JOIN users u ON u.id = a.actor_id
+     WHERE a.action = 'UPDATE' AND (
+       (a.table_name = 'visits' AND a.record_id = ?) OR
+       (a.table_name = 'recommendations' AND a.record_id IN (SELECT id FROM recommendations WHERE visit_id = ?)))`,
+    visit.id, visit.id
+  );
+  const activity = [...buildActivity(bundle), ...reopenActivity(auditRows)]
+    .sort((a, z) => z.date.localeCompare(a.date));
   const canManageRec = p.isMaintEngineer || p.isAdmin;
   const canEditRec = p.isMaintEngineer || p.isTechEngineer || p.isAdmin;
   type Rec = VisitBundle['recs'][number];
@@ -878,6 +922,18 @@ routes.get('/:id', async (c) => {
       </Card>
 
       {/* ---- Modals ---- */}
+      {p.canClose && c.req.query('prompt-close') === '1' && (
+        <Modal id="prompt-close" title="Close this visit?" autoOpen>
+          <div class="modal__content">
+            <p>All recommendations on this visit are resolved — it can be closed now.</p>
+            <div class="modal__buttons">
+              <button type="button" class="btn" data-close>Not yet</button>
+              <ActionButton action={`/visits/${visit.id}/close`} label="Close Visit" class="btn btn--green" busy="Closing…" />
+            </div>
+          </div>
+        </Modal>
+      )}
+
       <Modal id="confirm-date" title="Confirm Visit Date">
         <form method="post" action={`/visits/${visit.id}/confirm-date`}>
           <div class="context">Scheduled for <strong>{fmtDate(visit.scheduled_date)}</strong>. Confirm the date agreed with the vendor.</div>

@@ -71,6 +71,9 @@ document.querySelectorAll('[data-show-when]').forEach((el) => {
   el.querySelectorAll('input, select, textarea').forEach((c) => (c.disabled = !show));
 });
 
+// Dialogs marked for auto-open (e.g. the "ready to close the visit?" prompt).
+document.querySelectorAll('dialog[data-open-on-load]').forEach((d) => d.showModal());
+
 // Toast: fade out after a few seconds.
 const toast = document.querySelector('.toast');
 if (toast) {

@@ -134,9 +134,9 @@ export const EmptyState: FC<{ title: string; hint?: string; children?: Child }> 
   </div>
 );
 
-/** <dialog> modal; open it with any element carrying data-modal="<id>". */
-export const Modal: FC<{ id: string; title: string; children?: Child }> = ({ id, title, children }) => (
-  <dialog id={id} class="modal" aria-label={title}>
+/** <dialog> modal; open it with any element carrying data-modal="<id>", or on page load via autoOpen. */
+export const Modal: FC<{ id: string; title: string; children?: Child; autoOpen?: boolean }> = ({ id, title, children, autoOpen }) => (
+  <dialog id={id} class="modal" aria-label={title} {...(autoOpen ? { 'data-open-on-load': '' } : {})}>
     <header class="modal__head">
       <h2>{title}</h2>
       <button type="button" class="btn btn--ghost" data-close aria-label="Close">✕</button>
