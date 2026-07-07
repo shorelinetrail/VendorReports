@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { getCookie, setCookie } from 'hono/cookie';
 import { all, first } from '../db';
 import { addDays, fmtDate, fmtMonth, monthStart, todayStr } from '../dates';
 import { page, StatCard, Card, EmptyState, taskBadge, visitBadge, isTaskOverdue } from '../ui';
@@ -30,6 +31,14 @@ routes.get('/', async (c) => {
   const month = /^\d{4}-\d{2}$/.test(c.req.query('cal') ?? '') ? c.req.query('cal')! : today.slice(0, 7);
   const selected = c.req.query('date') ?? null;
   const days = calendarDays(month);
+
+  // Calendar chips show the vendor by default; ?labels= switches and the
+  // choice is remembered in a cookie.
+  const labelsParam = c.req.query('labels');
+  if (labelsParam === 'plan' || labelsParam === 'vendor') {
+    setCookie(c, 'cal_labels', labelsParam, { path: '/', maxAge: 365 * 86400, sameSite: 'Lax' });
+  }
+  const labelMode = (labelsParam ?? getCookie(c, 'cal_labels')) === 'plan' ? 'plan' : 'vendor';
 
   const [counts, myTasks, upcoming, calVisits, selectedVisits] = await Promise.all([
     first<{ routines: number; visits: number; open_recs: number; completed_month: number }>(
@@ -107,7 +116,13 @@ routes.get('/', async (c) => {
           }
         >
           <div class="cal">
-            <div class="cal__head"><strong>{fmtMonth(month)}</strong></div>
+            <div class="cal__head">
+              <strong>{fmtMonth(month)}</strong>
+              <span class="btn-row" role="group" aria-label="Calendar labels">
+                <a class={`btn btn--sm ${labelMode === 'vendor' ? 'btn--primary' : ''}`} href={`${keepCal(selected ?? undefined)}&labels=vendor`}>Vendor</a>
+                <a class={`btn btn--sm ${labelMode === 'plan' ? 'btn--primary' : ''}`} href={`${keepCal(selected ?? undefined)}&labels=plan`}>Plan #</a>
+              </span>
+            </div>
             <div class="cal__grid">
               {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => <div class="cal__dow">{d}</div>)}
               {days.map((day) => {
@@ -123,7 +138,7 @@ routes.get('/', async (c) => {
                     <span class="cal__num">{parseInt(day.slice(8), 10)}</span>
                     {events.slice(0, 3).map((v) => (
                       <span class={`cal__evt evt--${v.status}`} title={`${v.plan_number} - ${v.vendor_name} (${VISIT_STATUS_LABELS[v.status]})`}>
-                        {v.plan_number}
+                        {labelMode === 'plan' ? v.plan_number : v.vendor_name}
                       </span>
                     ))}
                     {events.length > 3 && <span class="cal__more">+{events.length - 3} more</span>}
