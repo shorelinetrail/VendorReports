@@ -40,6 +40,7 @@ export const isAdmin = (u: Pick<User, 'role' | 'is_admin'>) => u.role === 'admin
 export interface Vendor {
   id: string;
   name: string;
+  vendor_number: string | null;
   contact_name: string | null;
   contact_email: string | null;
   contact_phone: string | null;

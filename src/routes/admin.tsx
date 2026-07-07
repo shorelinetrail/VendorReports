@@ -5,8 +5,11 @@ import { fmtDate, fmtDateTime } from '../dates';
 import { findUserByEmail, flash, hashPassword, requireRole } from '../auth';
 import { parseCsv, csvObjects, csvResponse } from '../csv';
 import { CONFIG_DEFAULTS, expireTasks, generateVisits, getConfig, setConfigValue, type ConfigKey } from '../workflow';
-import { page, Card, PageHeader, EmptyState, Modal, ModalButtons, Field, ActionButton, IconAction, IconModalBtn, Badge, Icon } from '../ui';
-import { isAdmin, ROLES, ROLE_LABELS, type App, type User, type UserRole, type Vendor } from '../types';
+import { page, Card, PageHeader, EmptyState, Modal, ModalButtons, Field, ActionButton, IconAction, IconModalBtn, Badge, Icon, StatCard, visitBadge, recBadge } from '../ui';
+import {
+  isAdmin, ROLES, ROLE_LABELS, REC_STATUS_LABELS,
+  type App, type Recommendation, type Routine, type User, type UserRole, type Vendor, type Visit, type VisitStatus,
+} from '../types';
 
 const routes = new Hono<App>();
 const admin = requireRole('admin');
@@ -234,7 +237,12 @@ routes.post('/users/:id', admin, async (c) => {
 function VendorForm({ action, vendor, submit }: { action: string; vendor?: Vendor; submit: string }) {
   return (
     <form method="post" action={action}>
-      <Field label="Vendor name"><input name="name" required value={vendor?.name ?? ''} /></Field>
+      <div class="form-grid">
+        <Field label="Vendor name"><input name="name" required value={vendor?.name ?? ''} /></Field>
+        <Field label="Vendor no. (optional)">
+          <input name="vendor_number" value={vendor?.vendor_number ?? ''} placeholder="e.g. 100234" />
+        </Field>
+      </div>
       <Field label="Contact name (optional)"><input name="contact_name" value={vendor?.contact_name ?? ''} placeholder="Who to speak to at the vendor" /></Field>
       <div class="form-grid">
         <Field label="Contact email (optional)"><input type="email" name="contact_email" value={vendor?.contact_email ?? ''} /></Field>
@@ -260,11 +268,12 @@ routes.get('/vendors', admin, async (c) => {
         ) : (
           <div class="tbl-wrap">
             <table class="tbl">
-              <thead><tr><th>Name</th><th>Contact</th><th>Email</th><th>Phone</th><th>Address</th><th>Status</th><th class="actions">Actions</th></tr></thead>
+              <thead><tr><th>Name</th><th>Vendor No.</th><th>Contact</th><th>Email</th><th>Phone</th><th>Address</th><th>Status</th><th class="actions">Actions</th></tr></thead>
               <tbody>
                 {vendors.map((v) => (
-                  <tr data-row-modal={`edit-${v.id}`}>
-                    <td><strong>{v.name}</strong></td>
+                  <tr data-href={`/vendors/${v.id}`}>
+                    <td><a class="rowlink" href={`/vendors/${v.id}`}>{v.name}</a></td>
+                    <td>{v.vendor_number ?? '-'}</td>
                     <td>{v.contact_name ?? '-'}</td>
                     <td>{v.contact_email ?? '-'}</td>
                     <td>{v.contact_phone ?? '-'}</td>
@@ -293,7 +302,7 @@ routes.get('/vendors', admin, async (c) => {
       ))}
       <Modal id="import" title="Bulk Import Vendors">
         <form method="post" action="/vendors/import" enctype="multipart/form-data">
-          <p class="muted">CSV with headers: <span class="mono">name, contact_name, contact_email, contact_phone, address</span> (only name is required).</p>
+          <p class="muted">CSV with headers: <span class="mono">name, vendor_number, contact_name, contact_email, contact_phone, address</span> (only name is required).</p>
           <Field label="CSV file"><input type="file" name="file" accept=".csv" required /></Field>
           <ModalButtons submit="Import" busy="Importing…" />
         </form>
@@ -302,8 +311,175 @@ routes.get('/vendors', admin, async (c) => {
   ));
 });
 
+// Vendor detail: the hub view. Readable by every signed-in user (the underlying
+// data is already visible on visits/routines); management stays admin-only.
+routes.get('/vendors/:id', async (c) => {
+  const db = c.env.DB;
+  const vendor = await first<Vendor>(db, 'SELECT * FROM vendors WHERE id = ?', c.req.param('id'));
+  if (!vendor) return c.text('Vendor not found', 404);
+  const userIsAdmin = isAdmin(c.get('realUser'));
+
+  const history = userIsAdmin
+    ? await all<AuditRow>(
+        db,
+        `SELECT a.id, a.table_name, a.record_id, a.action, a.old_data, a.new_data, a.created_at, u.full_name AS actor_name
+         FROM audit_log a LEFT JOIN users u ON u.id = a.actor_id
+         WHERE a.table_name = 'vendors' AND a.record_id = ?
+         ORDER BY a.id DESC LIMIT 20`,
+        vendor.id)
+    : [];
+
+  const [routines, visits, openRecs, stats] = await Promise.all([
+    all<Routine & { next_open: string | null }>(
+      db,
+      `SELECT r.*, (SELECT MIN(scheduled_date) FROM visits WHERE routine_id = r.id AND status NOT IN ('completed', 'cancelled')) AS next_open
+       FROM routines r WHERE r.vendor_id = ? ORDER BY r.plan_number`,
+      vendor.id),
+    all<Visit & { plan_number: string }>(
+      db,
+      `SELECT v.*, r.plan_number FROM visits v JOIN routines r ON r.id = v.routine_id
+       WHERE r.vendor_id = ? ORDER BY v.scheduled_date DESC LIMIT 15`,
+      vendor.id),
+    all<Recommendation & { plan_number: string }>(
+      db,
+      `SELECT rec.*, r.plan_number FROM recommendations rec
+       JOIN visits v ON v.id = rec.visit_id JOIN routines r ON r.id = v.routine_id
+       WHERE r.vendor_id = ? AND rec.status IN ('open', 'in_review', 'approved')
+       ORDER BY rec.due_date IS NULL, rec.due_date`,
+      vendor.id),
+    first<{ total: number; completed: number; reports: number }>(
+      db,
+      `SELECT
+         (SELECT COUNT(*) FROM visits v JOIN routines r ON r.id = v.routine_id WHERE r.vendor_id = ?1) AS total,
+         (SELECT COUNT(*) FROM visits v JOIN routines r ON r.id = v.routine_id WHERE r.vendor_id = ?1 AND v.status = 'completed') AS completed,
+         (SELECT COUNT(*) FROM visit_reports vr JOIN visits v ON v.id = vr.visit_id JOIN routines r ON r.id = v.routine_id WHERE r.vendor_id = ?1) AS reports`,
+      vendor.id),
+  ]);
+
+  return page(c, vendor.name, (
+    <>
+      <PageHeader
+        title={vendor.name}
+        sub={`${vendor.vendor_number ? `Vendor no. ${vendor.vendor_number} · ` : ''}${vendor.is_active ? 'Active vendor' : 'Archived vendor'}`}
+      >
+        {userIsAdmin && (
+          <>
+            <button class="btn" data-modal="edit-vendor"><Icon name="edit" size={16} /> Edit Vendor</button>
+            <button class="btn" data-modal="vendor-history"><Icon name="history" size={16} /> History</button>
+          </>
+        )}
+        <a class="btn" href="/vendors">← All vendors</a>
+      </PageHeader>
+
+      <div class="stats">
+        <StatCard label="Total Visits" value={stats?.total ?? 0} href={`/visits?q=${encodeURIComponent(vendor.name)}`} icon="clipboard" tone="blue" />
+        <StatCard label="Completed" value={stats?.completed ?? 0} href={`/visits?q=${encodeURIComponent(vendor.name)}&status=completed`} icon="check" tone="green" />
+        <StatCard label="Completion Rate" value={`${stats?.total ? Math.round(((stats?.completed ?? 0) / stats.total) * 100) : 0}%`} href="/analytics" icon="trend" tone="purple" />
+        <StatCard label="Open Recommendations" value={openRecs.length} href="/recommendations?status=active" icon="file" tone="amber" />
+        <StatCard label="Reports on File" value={stats?.reports ?? 0} href={`/reports?vendor=${vendor.id}`} icon="download" tone="gray" />
+      </div>
+
+      <div class="grid-2">
+        <div class="stack">
+          <Card title="Visit History" pad={false}>
+            {visits.length === 0 ? <EmptyState title="No visits yet" /> : (
+              <table class="tbl">
+                <thead><tr><th>Plan</th><th>Scheduled</th><th>Confirmed</th><th>Status</th></tr></thead>
+                <tbody>
+                  {visits.map((v) => (
+                    <tr data-href={`/visits/${v.id}`}>
+                      <td><a class="rowlink" href={`/visits/${v.id}`}>{v.plan_number}</a></td>
+                      <td>{fmtDate(v.scheduled_date)}</td>
+                      <td>{fmtDate(v.confirmed_date)}</td>
+                      <td>{visitBadge(v.status as VisitStatus)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Card>
+
+          <Card title="Open Recommendations" pad={false}>
+            {openRecs.length === 0 ? <EmptyState title="Nothing outstanding" /> : (
+              <table class="tbl">
+                <tbody>
+                  {openRecs.map((r) => (
+                    <tr data-href={`/visits/${r.visit_id}`}>
+                      <td><div class="desc-clip">{r.description}</div><div class="muted">{r.plan_number}</div></td>
+                      <td class={r.due_date && r.due_date < new Date().toISOString().slice(0, 10) ? 'text-red' : ''}>{fmtDate(r.due_date)}</td>
+                      <td>{recBadge(r.status)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Card>
+        </div>
+
+        <div class="stack">
+          <Card title="Contact">
+            <dl class="kv" style="grid-template-columns:1fr">
+              <div><dt>Vendor No.</dt><dd>{vendor.vendor_number ?? '-'}</dd></div>
+              <div><dt>Contact</dt><dd>{vendor.contact_name ?? '-'}</dd></div>
+              <div><dt>Email</dt><dd>{vendor.contact_email ? <a href={`mailto:${vendor.contact_email}`}>{vendor.contact_email}</a> : '-'}</dd></div>
+              <div><dt>Phone</dt><dd>{vendor.contact_phone ? <a href={`tel:${vendor.contact_phone}`}>{vendor.contact_phone}</a> : '-'}</dd></div>
+              <div><dt>Address</dt><dd style="white-space:pre-wrap">{vendor.address ?? '-'}</dd></div>
+            </dl>
+          </Card>
+
+          <Card title="Routines" pad={false}>
+            {routines.length === 0 ? <EmptyState title="No routines for this vendor" /> : (
+              <table class="tbl">
+                <tbody>
+                  {routines.map((r) => (
+                    <tr>
+                      <td>
+                        <strong>{r.plan_number}</strong> <span class="muted">every {r.interval_months} mo</span>
+                        <div class="muted desc-clip">{r.description}</div>
+                      </td>
+                      <td>
+                        {r.is_active ? <Badge tone="green">Active</Badge> : <Badge tone="gray">Inactive</Badge>}
+                        <div class="muted">Next: {fmtDate(r.next_open)}</div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Card>
+
+        </div>
+      </div>
+
+      {userIsAdmin && (
+        <>
+          <Modal id="edit-vendor" title={`Edit ${vendor.name}`}>
+            <VendorForm action={`/vendors/${vendor.id}`} vendor={vendor} submit="Save Changes" />
+          </Modal>
+          <Modal id="vendor-history" title="Change History">
+            <div class="modal__content">
+              {history.length === 0 ? <p class="muted">No changes recorded.</p> : (
+                <ul class="timeline">
+                  {history.map((h) => (
+                    <li>
+                      <strong>{h.action === 'INSERT' ? 'Created' : h.action === 'DELETE' ? 'Deleted' : 'Updated'}</strong>
+                      <span class="muted"> {fmtDateTime(h.created_at)} - {h.actor_name ?? 'system'}</span>
+                      {changeSummary(h) && <div class="muted mono desc-clip">{changeSummary(h)}</div>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </Modal>
+        </>
+      )}
+    </>
+  ));
+});
+
 const vendorFields = (form: FormData) => ({
   name: String(form.get('name') ?? '').trim(),
+  vendor_number: String(form.get('vendor_number') ?? '').trim() || null,
   contact_name: String(form.get('contact_name') ?? '').trim() || null,
   contact_email: String(form.get('contact_email') ?? '').trim() || null,
   contact_phone: String(form.get('contact_phone') ?? '').trim() || null,
@@ -314,8 +490,12 @@ routes.post('/vendors', admin, async (c) => {
   const data = vendorFields(await c.req.formData());
   if (!data.name) flash(c, 'A vendor name is required.', 'err');
   else {
-    await insertRow(c.env.DB, 'vendors', { ...data, is_active: 1 }, c.get('realUser').id);
-    flash(c, `Vendor ${data.name} created.`);
+    try {
+      await insertRow(c.env.DB, 'vendors', { ...data, is_active: 1 }, c.get('realUser').id);
+      flash(c, `Vendor ${data.name} created.`);
+    } catch (err) {
+      flash(c, err instanceof Error && err.message.includes('UNIQUE') ? `Vendor number ${data.vendor_number} is already in use.` : 'Failed to create vendor.', 'err');
+    }
   }
   return c.redirect('/vendors');
 });
@@ -336,11 +516,16 @@ routes.post('/vendors/import', admin, async (c) => {
   const errors: string[] = [];
   for (const [i, rec] of records.entries()) {
     if (!rec.name) { errors.push(`Row ${i + 2}: missing name`); continue; }
-    await insertRow(c.env.DB, 'vendors', {
-      name: rec.name, contact_name: rec.contact_name || null, contact_email: rec.contact_email || null,
-      contact_phone: rec.contact_phone || null, address: rec.address || null, is_active: 1,
-    }, c.get('realUser').id);
-    ok++;
+    try {
+      await insertRow(c.env.DB, 'vendors', {
+        name: rec.name, vendor_number: rec.vendor_number || null, contact_name: rec.contact_name || null,
+        contact_email: rec.contact_email || null, contact_phone: rec.contact_phone || null,
+        address: rec.address || null, is_active: 1,
+      }, c.get('realUser').id);
+      ok++;
+    } catch (err) {
+      errors.push(`Row ${i + 2}: ${err instanceof Error && err.message.includes('UNIQUE') ? 'duplicate vendor_number' : 'failed'}`);
+    }
   }
   flash(c, `Imported ${ok} of ${records.length} vendor(s).${errors.length ? ` ${errors.slice(0, 3).join('; ')}` : ''}`, errors.length ? 'err' : 'ok');
   return c.redirect('/vendors');
@@ -357,12 +542,17 @@ routes.post('/vendors/:id/toggle-active', admin, async (c) => {
 
 routes.post('/vendors/:id', admin, async (c) => {
   const data = vendorFields(await c.req.formData());
+  const back = c.req.header('referer')?.includes(`/vendors/${c.req.param('id')}`) ? `/vendors/${c.req.param('id')}` : '/vendors';
   if (!data.name) flash(c, 'A vendor name is required.', 'err');
   else {
-    await updateRow(c.env.DB, 'vendors', c.req.param('id')!, data, c.get('realUser').id);
-    flash(c, `Vendor ${data.name} updated.`);
+    try {
+      await updateRow(c.env.DB, 'vendors', c.req.param('id')!, data, c.get('realUser').id);
+      flash(c, `Vendor ${data.name} updated.`);
+    } catch (err) {
+      flash(c, err instanceof Error && err.message.includes('UNIQUE') ? `Vendor number ${data.vendor_number} is already in use.` : 'Failed to update vendor.', 'err');
+    }
   }
-  return c.redirect('/vendors');
+  return c.redirect(back);
 });
 
 // ---------- Settings ----------

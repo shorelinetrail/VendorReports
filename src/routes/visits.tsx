@@ -43,8 +43,8 @@ routes.get('/', async (c) => {
     params.push(statusFilter);
   }
   if (q) {
-    where.push('(r.plan_number LIKE ? OR ve.name LIKE ? OR r.description LIKE ? OR v.notification_number LIKE ?)');
-    params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+    where.push('(r.plan_number LIKE ? OR ve.name LIKE ? OR ve.vendor_number LIKE ? OR r.description LIKE ? OR v.notification_number LIKE ?)');
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
   }
   if (mine) {
     where.push('(v.vendor_coordinator_id = ? OR v.maintenance_engineer_id = ? OR v.technical_engineer_id = ?)');
@@ -317,7 +317,7 @@ routes.post('/:id/reports', async (c) => {
   });
 });
 
-routes.get('/:id/reports/:reportId/download', async (c) => {
+async function serveReport(c: Context<App>, disposition: 'attachment' | 'inline'): Promise<Response> {
   const report = await first<VisitReport>(
     c.env.DB, 'SELECT * FROM visit_reports WHERE id = ? AND visit_id = ?', c.req.param('reportId'), c.req.param('id'));
   if (!report) return c.text('Report not found', 404);
@@ -326,10 +326,14 @@ routes.get('/:id/reports/:reportId/download', async (c) => {
   return new Response(object.body, {
     headers: {
       'Content-Type': report.content_type ?? 'application/octet-stream',
-      'Content-Disposition': `attachment; filename="${report.file_name.replace(/"/g, '')}"`,
+      'Content-Disposition': `${disposition}; filename="${report.file_name.replace(/"/g, '')}"`,
     },
   });
-});
+}
+
+routes.get('/:id/reports/:reportId/download', (c) => serveReport(c, 'attachment'));
+// PDFs render in the browser tab; formats the browser can't show fall back to downloading.
+routes.get('/:id/reports/:reportId/view', (c) => serveReport(c, 'inline'));
 
 routes.post('/:id/reports/:reportId/delete', async (c) => {
   return withVisit(c, (b) => perms(c, b).isAdmin, async (b) => {
@@ -874,7 +878,10 @@ routes.get('/:id', async (c) => {
 
   return page(c, `Visit ${routine.plan_number}`, (
     <>
-      <PageHeader title={`${routine.plan_number} - ${routine.vendor_name}`} sub={routine.description}>
+      <PageHeader
+        title={<>{routine.plan_number} - <a href={`/vendors/${routine.vendor_id}`}>{routine.vendor_name}</a></>}
+        sub={routine.description}
+      >
         <a class="btn" href="/visits">← All visits</a>
       </PageHeader>
 
@@ -968,6 +975,7 @@ routes.get('/:id', async (c) => {
               <strong>{r.file_name}</strong>
               <span class="muted">Uploaded by {r.uploaded_by_name} on {fmtDateTime(r.uploaded_at)}{r.notes ? ` - ${r.notes}` : ''}</span>
               <span class="btn-row mt" style="margin-top:0.4rem">
+                <a class="btn btn--sm btn--icon" href={`/visits/${visit.id}/reports/${r.id}/view`} target="_blank" title="View in browser" aria-label="View report in browser"><Icon name="eye" size={15} /></a>
                 <a class="btn btn--sm btn--icon" href={`/visits/${visit.id}/reports/${r.id}/download`} title="Download report" aria-label="Download report"><Icon name="download" size={15} /></a>
                 {p.isAdmin && (
                   <IconAction action={`/visits/${visit.id}/reports/${r.id}/delete`} icon="trash" label="Delete report"
