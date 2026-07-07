@@ -65,7 +65,7 @@ routes.get('/', async (c) => {
 
       <Card pad={false}>
         <form class="filterbar" method="get" action="/visits">
-          <input name="q" value={q} placeholder="Search plan, vendor, notification #…" style="max-width:240px" aria-label="Search visits" />
+          <input name="q" value={q} placeholder="Search plan, vendor, notification #…" class="grow" aria-label="Search visits" />
           <select name="status" data-autosubmit aria-label="Filter by status">
             <option value="all">All statuses</option>
             {Object.entries(VISIT_STATUS_LABELS).map(([value, label]) => (

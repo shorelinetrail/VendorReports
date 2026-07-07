@@ -70,7 +70,7 @@ routes.get('/reports', async (c) => {
       <PageHeader title="Maintenance Reports" sub="Browse and download every uploaded report" />
       <Card pad={false}>
         <form class="filterbar" method="get" action="/reports">
-          <input name="q" value={q} placeholder="Search plan, vendor, file…" style="max-width:220px" />
+          <input name="q" value={q} placeholder="Search plan, vendor, file…" class="grow" aria-label="Search reports" />
           <select name="vendor" data-autosubmit aria-label="Filter by vendor">
             <option value="all">All vendors</option>
             {vendors.map((v) => <option value={v.id} selected={vendor === v.id}>{v.name}</option>)}
