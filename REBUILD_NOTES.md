@@ -210,6 +210,35 @@ Workflow refinements added after hands-on review of the finished rebuild:
   with hyphens; assorted sizing fixes (stepper lines, modal buttons, filter
   bars with full-width search fields).
 
+### Second wave (same day, continued testing)
+
+- **Task chain completed.** Confirming a date seeds an *Upload Report* task
+  (due confirmed date + `report_upload_weeks`); a report or "no report" seeds
+  a *Create Recommendations* task (due + `recommendations_review_days`) — the
+  two deadline settings that previously drove nothing now do. Rescheduling
+  cancels the later-step tasks; reviews/closures sweep stragglers so a
+  finished visit never carries open tasks.
+- **Cancel visit** (migration `0003`). Coordinator/admin can cancel an open
+  visit with a required reason; open tasks are cancelled; the assigned team
+  can reopen it, with the visit returning to the correct workflow position
+  and the next-step task re-seeded. Cancel/reopen appear in the activity log.
+- **Assigned-action responses** (migration `0002`, first wave) got their
+  scope note here corrected: reviews that assign an action create a
+  *Respond to Recommendation* task for the assignee.
+- **Needs Attention dashboard.** Admins/coordinators see open visits whose
+  workflow task is overdue, earliest first, with what's overdue and who it's
+  waiting on.
+- **Admin on any role** (migration `0004`). An "Also grant admin access"
+  checkbox lets a coordinator/engineer hold full admin rights on top of their
+  functional role — admin nav, impersonation, needs-attention and all admin
+  powers, via a single `isAdmin()` helper used everywhere.
+- **Vendor contact name** (migration `0005`), shown in the vendors table and
+  on the visit page's Vendor Contact block with the email/phone links; a
+  "My visits" (assigned-to-me) filter on the visits list.
+- **UI:** row-action buttons are icon-only with tooltip labels (aria-labels
+  for screen readers); Actions columns left-aligned; calendar month/year jump
+  selector; search fields fill the filter bar; spacing fixes.
+
 ## Known limitations
 
 - No email/notification delivery (same as the old app — the in-app
