@@ -171,6 +171,45 @@ the admin Reset Password action.
   cross-origin POST rejected (CSRF); impersonation start/stop with banner, and
   role checks that must not be spoofed use the real user.
 
+## Post-rebuild changes (from user testing, 2026-07-07)
+
+Workflow refinements added after hands-on review of the finished rebuild:
+
+- **Review handoff fixed.** Submitting the last pending technical review moves
+  the visit from *In Review* back to *Recommendations Created*, so the
+  "waiting for" banner points at the maintenance engineer instead of still
+  blaming the technical engineer (a quirk inherited from the old app).
+- **Recommendation actions properly owned.** Complete/Cancel belong to the
+  visit's maintenance engineer or an admin (UI + server-enforced); the
+  technical engineer's only recommendation action is reviewing. Complete is
+  hidden while it's impossible (SAP details missing, or an assigned response
+  outstanding) with the real next action promoted instead.
+- **Assigned actions require a response** (migration `0002`). When a review
+  assigns an action to someone, they get a *Respond to Recommendation* task
+  and a Respond modal on the visit; the recommendation cannot be completed
+  until their response (stored with a timestamp) exists.
+- **Reopening.** The assigned team (or an admin) can reopen a completed visit;
+  the visit's ME/TE can reopen completed/cancelled recommendations (reviewed
+  ones return as *Approved*, unreviewed as *Open*; any pending close-visit
+  task is cancelled). Reopens appear in the visit activity log with who did
+  them, sourced from the audit trail.
+- **Close-visit prompt.** Resolving the last recommendation redirects to the
+  visit with an auto-opening "Close this visit?" dialog (Close Visit / Not
+  yet) for whoever can close; a green ready-to-close banner is the persistent
+  and no-JS fallback.
+- **Visit search.** The visits page gained a search box (plan number, vendor,
+  description, notification number — all visits past and present, combinable
+  with the status filter), plus a topbar quick-search on every other page.
+- **Editing.** The visit's ME/TE (or admin) can edit a recommendation's
+  description, SAP number and due date until it is completed/cancelled.
+- **UI polish.** Clicking anywhere on a table row opens its item; the
+  dashboard is two independent column stacks (My Pending Tasks sits under the
+  Selected Date card); the calendar shows vendor names by default with a
+  persistent Vendor/Plan# toggle and a month/year jump selector; long text
+  wraps or truncates properly with click-to-expand clamps; em dashes replaced
+  with hyphens; assorted sizing fixes (stepper lines, modal buttons, filter
+  bars with full-width search fields).
+
 ## Known limitations
 
 - No email/notification delivery (same as the old app — the in-app
