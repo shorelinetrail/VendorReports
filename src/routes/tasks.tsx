@@ -3,7 +3,7 @@ import type { Context } from 'hono';
 import { all, first, updateRow, now } from '../db';
 import { fmtDate, todayStr } from '../dates';
 import { flash } from '../auth';
-import { page, Card, PageHeader, EmptyState, StatCard, taskBadge, isTaskOverdue } from '../ui';
+import { page, Card, PageHeader, EmptyState, StatCard, taskBadge, isTaskOverdue, Icon, IconAction } from '../ui';
 import { isAdmin, TASK_TYPE_LABELS, type App, type Task, type TaskStatus, type TaskType } from '../types';
 
 const routes = new Hono<App>();
@@ -106,16 +106,12 @@ routes.get('/', async (c) => {
                       <td class={overdue(t) ? 'text-red' : ''}>{fmtDate(t.due_date)}</td>
                       <td>{taskBadge(t.status, t.due_date)}</td>
                       <td class="actions">
-                        <a class="btn btn--sm" href={`/visits/${t.visit_id}`}>Open Visit</a>
+                        <a class="btn btn--sm btn--icon" href={`/visits/${t.visit_id}`} title="Open visit" aria-label="Open visit"><Icon name="eye" size={15} /></a>
                         {mine && open && t.status !== 'in_progress' && (
-                          <form method="post" action={`/tasks/${t.id}/start`} class="inline">
-                            <button class="btn btn--sm" data-busy="…">Start</button>
-                          </form>
+                          <IconAction action={`/tasks/${t.id}/start`} icon="play" label="Start task" />
                         )}
                         {mine && open && (
-                          <form method="post" action={`/tasks/${t.id}/complete`} class="inline">
-                            <button class="btn btn--sm btn--green" data-busy="…">Complete</button>
-                          </form>
+                          <IconAction action={`/tasks/${t.id}/complete`} icon="tick" label="Complete task" class="btn--green" />
                         )}
                       </td>
                     </tr>

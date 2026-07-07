@@ -107,7 +107,7 @@ routes.get('/reports', async (c) => {
                     <td>{r.uploaded_by_name}</td>
                     <td>{visitBadge(r.status)}</td>
                     <td class="actions">
-                      <a class="btn btn--sm" href={`/visits/${r.visit_id}/reports/${r.id}/download`}><Icon name="download" size={14} /> Download</a>
+                      <a class="btn btn--sm btn--icon" href={`/visits/${r.visit_id}/reports/${r.id}/download`} title="Download report" aria-label="Download report"><Icon name="download" size={15} /></a>
                     </td>
                   </tr>
                 ))}

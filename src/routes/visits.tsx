@@ -13,7 +13,7 @@ import {
   cancelOpenTasks, completeOpenTasks, createTask, createTaskOnce, getConfig, maybeCreateCloseTask, visitPerms, waitingFor,
 } from '../workflow';
 import {
-  page, Card, PageHeader, EmptyState, Modal, ModalButtons, Field, ActionButton, Badge, visitBadge, recBadge, Icon,
+  page, Card, PageHeader, EmptyState, Modal, ModalButtons, Field, ActionButton, IconAction, IconModalBtn, Badge, visitBadge, recBadge, Icon,
 } from '../ui';
 import {
   isAdmin, REVIEW_DECISION_LABELS, ROLE_LABELS, TASK_TYPE_LABELS, VISIT_STATUS_LABELS,
@@ -107,12 +107,13 @@ routes.get('/', async (c) => {
                     <td>{v.notification_number ?? '-'}</td>
                     <td>{visitBadge(v.status)}</td>
                     <td class="actions">
-                      <a class="btn btn--sm" href={`/visits/${v.id}`}>Open</a>
+                      <a class="btn btn--sm btn--icon" href={`/visits/${v.id}`} title="Open visit" aria-label="Open visit"><Icon name="eye" size={15} /></a>
                       {isAdmin(user) && (
-                        <ActionButton
+                        <IconAction
                           action={`/visits/${v.id}/delete`}
-                          label="Delete"
-                          class="btn btn--sm btn--danger"
+                          icon="trash"
+                          label="Delete visit"
+                          class="btn--danger"
                           confirm={`Delete the visit for ${v.plan_number}? All its tasks, recommendations and reports are deleted too. This cannot be undone.`}
                         />
                       )}
@@ -175,7 +176,7 @@ routes.post('/', async (c) => {
 
 interface VisitBundle {
   visit: Visit;
-  routine: Routine & { vendor_name: string; vendor_email: string | null; vendor_phone: string | null };
+  routine: Routine & { vendor_name: string; vendor_contact: string | null; vendor_email: string | null; vendor_phone: string | null };
   recs: (Recommendation & { created_by_name: string; reviewed_by_name: string | null; action_assigned_name: string | null })[];
   reports: (VisitReport & { uploaded_by_name: string })[];
   tasks: Task[];
@@ -187,9 +188,10 @@ async function loadVisit(c: Context<App>, id: string): Promise<VisitBundle | nul
   const visit = await first<Visit>(db, 'SELECT * FROM visits WHERE id = ?', id);
   if (!visit) return null;
   const [routine, recs, reports, tasks, coordinator, maintEngineer, techEngineer] = await Promise.all([
-    first<Routine & { vendor_name: string; vendor_email: string | null; vendor_phone: string | null }>(
+    first<VisitBundle['routine']>(
       db,
-      `SELECT r.*, v.name AS vendor_name, v.contact_email AS vendor_email, v.contact_phone AS vendor_phone
+      `SELECT r.*, v.name AS vendor_name, v.contact_name AS vendor_contact,
+              v.contact_email AS vendor_email, v.contact_phone AS vendor_phone
        FROM routines r JOIN vendors v ON v.id = r.vendor_id WHERE r.id = ?`,
       visit.routine_id),
     all<VisitBundle['recs'][number]>(
@@ -904,10 +906,11 @@ routes.get('/:id', async (c) => {
             <div>
               <dt>Vendor Contact</dt>
               <dd>
+                {routine.vendor_contact && <>{routine.vendor_contact}<br /></>}
                 {routine.vendor_email ? <a href={`mailto:${routine.vendor_email}`}>{routine.vendor_email}</a> : null}
                 {routine.vendor_email && routine.vendor_phone ? <br /> : null}
                 {routine.vendor_phone ? <a href={`tel:${routine.vendor_phone}`}>{routine.vendor_phone}</a> : null}
-                {!routine.vendor_email && !routine.vendor_phone && '-'}
+                {!routine.vendor_contact && !routine.vendor_email && !routine.vendor_phone && '-'}
               </dd>
             </div>
             <div>
@@ -932,10 +935,10 @@ routes.get('/:id', async (c) => {
               <strong>{r.file_name}</strong>
               <span class="muted">Uploaded by {r.uploaded_by_name} on {fmtDateTime(r.uploaded_at)}{r.notes ? ` - ${r.notes}` : ''}</span>
               <span class="btn-row mt" style="margin-top:0.4rem">
-                <a class="btn btn--sm" href={`/visits/${visit.id}/reports/${r.id}/download`}><Icon name="download" size={14} /> Download</a>
+                <a class="btn btn--sm btn--icon" href={`/visits/${visit.id}/reports/${r.id}/download`} title="Download report" aria-label="Download report"><Icon name="download" size={15} /></a>
                 {p.isAdmin && (
-                  <ActionButton action={`/visits/${visit.id}/reports/${r.id}/delete`} label="Delete"
-                    class="btn btn--sm btn--danger" confirm={`Delete report "${r.file_name}"?`} />
+                  <IconAction action={`/visits/${visit.id}/reports/${r.id}/delete`} icon="trash" label="Delete report"
+                    class="btn--danger" confirm={`Delete report "${r.file_name}"?`} />
                 )}
               </span>
             </div>
@@ -993,32 +996,32 @@ routes.get('/:id', async (c) => {
                     <td>{rec.created_by_name}</td>
                     <td class="actions">
                       {!['completed', 'cancelled'].includes(rec.status) && canEditRec && (
-                        <button class="btn btn--sm" data-modal={`edit-rec-${rec.id}`}>Edit</button>
+                        <IconModalBtn modal={`edit-rec-${rec.id}`} icon="edit" label="Edit recommendation" />
                       )}
                       {rec.status === 'open' && !rec.sent_for_review && canManageRec && routine.requires_technical_review && (
-                        <ActionButton action={`/visits/${visit.id}/recommendations/${rec.id}/send-review`} label="Send for Review" class="btn btn--sm" />
+                        <IconAction action={`/visits/${visit.id}/recommendations/${rec.id}/send-review`} icon="send" label="Send for review" />
                       )}
                       {rec.status === 'in_review' && p.canReview && (
-                        <button class="btn btn--sm btn--primary" data-modal={`review-${rec.id}`}>Submit Review</button>
+                        <IconModalBtn modal={`review-${rec.id}`} icon="tasks" label="Submit review" class="btn--primary" />
                       )}
                       {rec.status === 'approved' && sapMissing(rec) && canManageRec && (
-                        <button class="btn btn--sm btn--primary" data-modal={`sap-${rec.id}`}>Add SAP Details</button>
+                        <IconModalBtn modal={`sap-${rec.id}`} icon="tag" label="Add SAP details" class="btn--primary" />
                       )}
                       {canRespond(rec) && (
-                        <button class="btn btn--sm btn--primary" data-modal={`respond-${rec.id}`}>Respond</button>
+                        <IconModalBtn modal={`respond-${rec.id}`} icon="message" label="Respond" class="btn--primary" />
                       )}
                       {['open', 'approved'].includes(rec.status) && canManageRec && (
                         <>
                           {/* Complete is impossible until SAP details / the assignee's response exist */}
                           {!sapMissing(rec) && !awaitingResponse(rec) && (
-                            <ActionButton action={`/visits/${visit.id}/recommendations/${rec.id}/complete`} label="Complete" class="btn btn--sm btn--green" />
+                            <IconAction action={`/visits/${visit.id}/recommendations/${rec.id}/complete`} icon="tick" label="Complete" class="btn--green" />
                           )}
-                          <button class="btn btn--sm btn--danger" data-modal={`cancel-rec-${rec.id}`}>Cancel</button>
+                          <IconModalBtn modal={`cancel-rec-${rec.id}`} icon="x" label="Cancel recommendation" class="btn--danger" />
                         </>
                       )}
                       {['completed', 'cancelled'].includes(rec.status) && canEditRec && p.isOpen && (
-                        <ActionButton action={`/visits/${visit.id}/recommendations/${rec.id}/reopen`} label="Reopen"
-                          class="btn btn--sm" confirm="Reopen this recommendation? The visit can't be closed until it is resolved again." />
+                        <IconAction action={`/visits/${visit.id}/recommendations/${rec.id}/reopen`} icon="rotate" label="Reopen recommendation"
+                          confirm="Reopen this recommendation? The visit can't be closed until it is resolved again." />
                       )}
                     </td>
                   </tr>

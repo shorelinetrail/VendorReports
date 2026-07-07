@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { all } from '../db';
 import { fmtDate, todayStr } from '../dates';
 import { activeUsers, requireRole } from '../auth';
-import { page, Card, PageHeader, EmptyState, StatCard, Modal, ModalButtons, Field, ActionButton, recBadge } from '../ui';
+import { page, Card, PageHeader, EmptyState, StatCard, Modal, ModalButtons, Field, Icon, IconAction, IconModalBtn, recBadge } from '../ui';
 import { isAdmin, REVIEW_DECISION_LABELS, ROLE_LABELS, type App, type Recommendation } from '../types';
 
 const routes = new Hono<App>();
@@ -113,22 +113,26 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
                     <td>{recBadge(r.status)}</td>
                     <td>{r.created_by_name}</td>
                     <td class="actions">
-                      <a class="btn btn--sm" href={`/visits/${r.visit_id}`}>Open Visit</a>
-                      {canEdit(r) && <button class="btn btn--sm" data-modal={`edit-${r.id}`}>Edit</button>}
+                      <a class="btn btn--sm btn--icon" href={`/visits/${r.visit_id}`} title="Open visit" aria-label="Open visit"><Icon name="eye" size={15} /></a>
+                      {canEdit(r) && <IconModalBtn modal={`edit-${r.id}`} icon="edit" label="Edit recommendation" />}
                       {r.status === 'in_review' && canReview && (
-                        <button class="btn btn--sm btn--primary" data-modal={`review-${r.id}`}>Review</button>
+                        <IconModalBtn modal={`review-${r.id}`} icon="tasks" label="Submit review" class="btn--primary" />
                       )}
                       {['open', 'approved'].includes(r.status) && canAct(r) && (
                         <>
                           {sapMissing(r) || awaitingResponse(r)
-                            ? <a class="btn btn--sm btn--primary" href={`/visits/${r.visit_id}`}>{sapMissing(r) ? 'Add SAP Details' : 'Awaiting Response'}</a>
-                            : <ActionButton action={`/visits/${r.visit_id}/recommendations/${r.id}/complete`} label="Complete" class="btn btn--sm btn--green" />}
-                          <button class="btn btn--sm btn--danger" data-modal={`cancel-${r.id}`}>Cancel</button>
+                            ? <a class="btn btn--sm btn--icon btn--primary" href={`/visits/${r.visit_id}`}
+                                title={sapMissing(r) ? 'Add SAP details (on the visit page)' : 'Awaiting assignee response'}
+                                aria-label={sapMissing(r) ? 'Add SAP details' : 'Awaiting assignee response'}>
+                                <Icon name={sapMissing(r) ? 'tag' : 'message'} size={15} />
+                              </a>
+                            : <IconAction action={`/visits/${r.visit_id}/recommendations/${r.id}/complete`} icon="tick" label="Complete" class="btn--green" />}
+                          <IconModalBtn modal={`cancel-${r.id}`} icon="x" label="Cancel recommendation" class="btn--danger" />
                         </>
                       )}
                       {canReopen(r) && (
-                        <ActionButton action={`/visits/${r.visit_id}/recommendations/${r.id}/reopen`} label="Reopen"
-                          class="btn btn--sm" confirm="Reopen this recommendation? The visit can't be closed until it is resolved again." />
+                        <IconAction action={`/visits/${r.visit_id}/recommendations/${r.id}/reopen`} icon="rotate" label="Reopen recommendation"
+                          confirm="Reopen this recommendation? The visit can't be closed until it is resolved again." />
                       )}
                     </td>
                   </tr>

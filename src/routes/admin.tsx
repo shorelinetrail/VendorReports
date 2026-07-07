@@ -5,7 +5,7 @@ import { fmtDate, fmtDateTime } from '../dates';
 import { findUserByEmail, flash, hashPassword, requireRole } from '../auth';
 import { parseCsv, csvObjects, csvResponse } from '../csv';
 import { CONFIG_DEFAULTS, expireTasks, generateVisits, getConfig, setConfigValue, type ConfigKey } from '../workflow';
-import { page, Card, PageHeader, EmptyState, Modal, ModalButtons, Field, ActionButton, Badge, Icon } from '../ui';
+import { page, Card, PageHeader, EmptyState, Modal, ModalButtons, Field, ActionButton, IconAction, IconModalBtn, Badge, Icon } from '../ui';
 import { isAdmin, ROLES, ROLE_LABELS, type App, type User, type UserRole, type Vendor } from '../types';
 
 const routes = new Hono<App>();
@@ -48,13 +48,14 @@ routes.get('/users', admin, async (c) => {
                   <td>{u.is_active ? <Badge tone="green">Active</Badge> : <Badge tone="gray">Inactive</Badge>}</td>
                   <td>{fmtDate(u.created_at)}</td>
                   <td class="actions">
-                    <button class="btn btn--sm" data-modal={`edit-${u.id}`}>Edit</button>
-                    <button class="btn btn--sm" data-modal={`password-${u.id}`}>Reset Password</button>
+                    <IconModalBtn modal={`edit-${u.id}`} icon="edit" label="Edit user" />
+                    <IconModalBtn modal={`password-${u.id}`} icon="key" label="Reset password" />
                     {u.id !== me.id && (
-                      <ActionButton
+                      <IconAction
                         action={`/users/${u.id}/toggle-active`}
-                        label={u.is_active ? 'Deactivate' : 'Reactivate'}
-                        class={`btn btn--sm ${u.is_active ? 'btn--danger' : 'btn--green'}`}
+                        icon={u.is_active ? 'user-x' : 'user-check'}
+                        label={u.is_active ? 'Deactivate user' : 'Reactivate user'}
+                        class={u.is_active ? 'btn--danger' : 'btn--green'}
                         confirm={u.is_active ? `Deactivate ${u.full_name}? They can no longer sign in and won't appear in assignment lists.` : undefined}
                       />
                     )}
@@ -234,6 +235,7 @@ function VendorForm({ action, vendor, submit }: { action: string; vendor?: Vendo
   return (
     <form method="post" action={action}>
       <Field label="Vendor name"><input name="name" required value={vendor?.name ?? ''} /></Field>
+      <Field label="Contact name (optional)"><input name="contact_name" value={vendor?.contact_name ?? ''} placeholder="Who to speak to at the vendor" /></Field>
       <div class="form-grid">
         <Field label="Contact email (optional)"><input type="email" name="contact_email" value={vendor?.contact_email ?? ''} /></Field>
         <Field label="Contact phone (optional)"><input type="tel" name="contact_phone" value={vendor?.contact_phone ?? ''} /></Field>
@@ -258,21 +260,23 @@ routes.get('/vendors', admin, async (c) => {
         ) : (
           <div class="tbl-wrap">
             <table class="tbl">
-              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th>Status</th><th class="actions">Actions</th></tr></thead>
+              <thead><tr><th>Name</th><th>Contact</th><th>Email</th><th>Phone</th><th>Address</th><th>Status</th><th class="actions">Actions</th></tr></thead>
               <tbody>
                 {vendors.map((v) => (
                   <tr data-row-modal={`edit-${v.id}`}>
                     <td><strong>{v.name}</strong></td>
+                    <td>{v.contact_name ?? '-'}</td>
                     <td>{v.contact_email ?? '-'}</td>
                     <td>{v.contact_phone ?? '-'}</td>
                     <td><div class="desc-clip">{v.address ?? '-'}</div></td>
                     <td>{v.is_active ? <Badge tone="green">Active</Badge> : <Badge tone="gray">Inactive</Badge>}</td>
                     <td class="actions">
-                      <button class="btn btn--sm" data-modal={`edit-${v.id}`}>Edit</button>
-                      <ActionButton
+                      <IconModalBtn modal={`edit-${v.id}`} icon="edit" label="Edit vendor" />
+                      <IconAction
                         action={`/vendors/${v.id}/toggle-active`}
-                        label={v.is_active ? 'Archive' : 'Restore'}
-                        class={`btn btn--sm ${v.is_active ? 'btn--danger' : 'btn--green'}`}
+                        icon={v.is_active ? 'archive' : 'rotate'}
+                        label={v.is_active ? 'Archive vendor' : 'Restore vendor'}
+                        class={v.is_active ? 'btn--danger' : 'btn--green'}
                         confirm={v.is_active ? `Archive ${v.name}? It stays on existing routines but is hidden from new ones.` : undefined}
                       />
                     </td>
@@ -289,7 +293,7 @@ routes.get('/vendors', admin, async (c) => {
       ))}
       <Modal id="import" title="Bulk Import Vendors">
         <form method="post" action="/vendors/import" enctype="multipart/form-data">
-          <p class="muted">CSV with headers: <span class="mono">name, contact_email, contact_phone, address</span> (only name is required).</p>
+          <p class="muted">CSV with headers: <span class="mono">name, contact_name, contact_email, contact_phone, address</span> (only name is required).</p>
           <Field label="CSV file"><input type="file" name="file" accept=".csv" required /></Field>
           <ModalButtons submit="Import" busy="Importing…" />
         </form>
@@ -300,6 +304,7 @@ routes.get('/vendors', admin, async (c) => {
 
 const vendorFields = (form: FormData) => ({
   name: String(form.get('name') ?? '').trim(),
+  contact_name: String(form.get('contact_name') ?? '').trim() || null,
   contact_email: String(form.get('contact_email') ?? '').trim() || null,
   contact_phone: String(form.get('contact_phone') ?? '').trim() || null,
   address: String(form.get('address') ?? '').trim() || null,
@@ -332,7 +337,7 @@ routes.post('/vendors/import', admin, async (c) => {
   for (const [i, rec] of records.entries()) {
     if (!rec.name) { errors.push(`Row ${i + 2}: missing name`); continue; }
     await insertRow(c.env.DB, 'vendors', {
-      name: rec.name, contact_email: rec.contact_email || null,
+      name: rec.name, contact_name: rec.contact_name || null, contact_email: rec.contact_email || null,
       contact_phone: rec.contact_phone || null, address: rec.address || null, is_active: 1,
     }, c.get('realUser').id);
     ok++;

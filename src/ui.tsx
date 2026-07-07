@@ -34,7 +34,27 @@ const ICON_PATHS: Record<string, string> = {
   plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
   eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
   history: '<path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/>',
+  edit: '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
+  trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
+  x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  play: '<polygon points="5 3 19 12 5 21 5 3"/>',
+  rotate: '<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>',
+  archive: '<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><line x1="10" y1="12" x2="14" y2="12"/>',
+  send: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
+  message: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  'user-x': '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="18" y1="8" x2="23" y2="13"/><line x1="23" y1="8" x2="18" y2="13"/>',
+  'user-check': '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/>',
+  tag: '<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z"/><line x1="7" y1="7" x2="7.01" y2="7"/>',
+  tick: '<polyline points="20 6 9 17 4 12"/>',
 };
+
+/** Icon-only row-action button that opens a modal; the label shows as a tooltip. */
+export const IconModalBtn: FC<{ modal: string; icon: string; label: string; class?: string }> = (props) => (
+  <button type="button" class={`btn btn--sm btn--icon ${props.class ?? ''}`} data-modal={props.modal} title={props.label} aria-label={props.label}>
+    <Icon name={props.icon} size={15} />
+  </button>
+);
 
 export const Icon: FC<{ name: string; size?: number }> = ({ name, size = 18 }) => (
   <svg
@@ -162,12 +182,26 @@ export const Field: FC<{ label: string; hint?: string; children?: Child }> = ({ 
 
 /** One-click POST button (optionally with a confirm prompt), rendered as an inline form. */
 export const ActionButton: FC<{
-  action: string; label: Child; confirm?: string; class?: string; busy?: string; hidden?: Record<string, string>;
+  action: string; label: Child; confirm?: string; class?: string; busy?: string; hidden?: Record<string, string>; title?: string;
 }> = (props) => (
   <form method="post" action={props.action} class="inline" data-confirm={props.confirm}>
     {props.hidden && Object.entries(props.hidden).map(([k, v]) => <input type="hidden" name={k} value={v} />)}
-    <button type="submit" class={props.class ?? 'btn btn--sm'} data-busy={props.busy ?? 'Working…'}>{props.label}</button>
+    <button type="submit" class={props.class ?? 'btn btn--sm'} data-busy={props.busy ?? 'Working…'} title={props.title} aria-label={props.title}>
+      {props.label}
+    </button>
   </form>
+);
+
+/** Icon-only POST action for table rows; the label shows as a tooltip. */
+export const IconAction: FC<{ action: string; icon: string; label: string; confirm?: string; class?: string }> = (props) => (
+  <ActionButton
+    action={props.action}
+    label={<Icon name={props.icon} size={15} />}
+    confirm={props.confirm}
+    class={`btn btn--sm btn--icon ${props.class ?? ''}`}
+    busy="…"
+    title={props.label}
+  />
 );
 
 // ---- Page shell ----

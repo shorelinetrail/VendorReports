@@ -4,7 +4,7 @@ import { all, first, insertRow, updateRow } from '../db';
 import { addMonths, fmtDate, todayStr } from '../dates';
 import { activeUsers, findUserByEmail, flash, requireRole } from '../auth';
 import { parseCsv, csvObjects, csvResponse } from '../csv';
-import { page, Card, PageHeader, EmptyState, Modal, ModalButtons, Field, ActionButton, Badge, Icon } from '../ui';
+import { page, Card, PageHeader, EmptyState, Modal, ModalButtons, Field, IconAction, IconModalBtn, Badge, Icon } from '../ui';
 import { isAdmin, ROLE_LABELS, type App, type Routine, type User, type Vendor } from '../types';
 
 const routes = new Hono<App>();
@@ -128,11 +128,12 @@ routes.get('/', async (c) => {
                       <td>{r.is_active ? <Badge tone="green">Active</Badge> : <Badge tone="gray">Inactive</Badge>}</td>
                       {canManage && (
                         <td class="actions">
-                          <button class="btn btn--sm" data-modal={`edit-${r.id}`}>Edit</button>
-                          <ActionButton
+                          <IconModalBtn modal={`edit-${r.id}`} icon="edit" label="Edit routine" />
+                          <IconAction
                             action={`/routines/${r.id}/toggle-active`}
-                            label={r.is_active ? 'Archive' : 'Restore'}
-                            class={`btn btn--sm ${r.is_active ? 'btn--danger' : 'btn--green'}`}
+                            icon={r.is_active ? 'archive' : 'rotate'}
+                            label={r.is_active ? 'Archive routine' : 'Restore routine'}
+                            class={r.is_active ? 'btn--danger' : 'btn--green'}
                             confirm={r.is_active ? `Archive routine ${r.plan_number}? No new visits will be generated (existing visits are kept).` : undefined}
                           />
                         </td>
