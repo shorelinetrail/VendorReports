@@ -74,6 +74,10 @@ export interface MaintenanceVisit {
   technical_engineer_id: string;
   technical_engineer?: User;
   no_report_reason: string | null;
+  reschedule_reason: string | null;
+  rescheduled_at: string | null;
+  rescheduled_from: string | null;
+  completed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -174,17 +178,20 @@ export interface Database {
       };
       maintenance_visits: {
         Row: MaintenanceVisit;
-        Insert: Omit<MaintenanceVisit, 'id' | 'created_at' | 'updated_at' | 'routine' | 'vendor_coordinator' | 'maintenance_engineer' | 'technical_engineer'>;
+        Insert: Partial<Omit<MaintenanceVisit, 'id' | 'created_at' | 'updated_at' | 'routine' | 'vendor_coordinator' | 'maintenance_engineer' | 'technical_engineer'>> &
+          Pick<MaintenanceVisit, 'routine_id' | 'scheduled_date' | 'vendor_coordinator_id' | 'maintenance_engineer_id' | 'technical_engineer_id'>;
         Update: Partial<Omit<MaintenanceVisit, 'id' | 'created_at' | 'updated_at' | 'routine' | 'vendor_coordinator' | 'maintenance_engineer' | 'technical_engineer'>>;
       };
       tasks: {
         Row: Task;
-        Insert: Omit<Task, 'id' | 'created_at' | 'updated_at' | 'visit' | 'assigned_to'>;
+        Insert: Partial<Omit<Task, 'id' | 'created_at' | 'updated_at' | 'visit' | 'assigned_to'>> &
+          Pick<Task, 'visit_id' | 'task_type' | 'assigned_to_id' | 'due_date'>;
         Update: Partial<Omit<Task, 'id' | 'created_at' | 'updated_at' | 'visit' | 'assigned_to'>>;
       };
       recommendations: {
         Row: Recommendation;
-        Insert: Omit<Recommendation, 'id' | 'created_at' | 'updated_at' | 'visit' | 'created_by' | 'reviewed_by' | 'action_assigned_to'>;
+        Insert: Partial<Omit<Recommendation, 'id' | 'created_at' | 'updated_at' | 'visit' | 'created_by' | 'reviewed_by' | 'action_assigned_to'>> &
+          Pick<Recommendation, 'visit_id' | 'description' | 'created_by_id'>;
         Update: Partial<Omit<Recommendation, 'id' | 'created_at' | 'updated_at' | 'visit' | 'created_by' | 'reviewed_by' | 'action_assigned_to'>>;
       };
       system_config: {

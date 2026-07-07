@@ -1,367 +1,92 @@
-'use client';
-
-import { useEffect, useState } from 'react';
-import { Save, RefreshCw, Calendar, Play } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
-import { SystemConfig } from '@/types/database';
-import Button from '@/components/ui/Button';
-import Input from '@/components/ui/Input';
+import { requireAuth } from '@/lib/auth';
+import { getDeadlines } from '@/lib/config';
+import type { DeadlineKey } from '@/lib/config';
+import PageHeader from '@/components/ui/PageHeader';
 import Alert from '@/components/ui/Alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import SettingsForm from './SettingsForm';
+import GenerateVisitsButton from './GenerateVisitsButton';
 
-interface ConfigSettings {
-  visit_confirmation_days: string;
-  report_upload_weeks: string;
-  recommendations_review_days: string;
-  technical_review_days: string;
-}
+export default async function SettingsPage() {
+  const { supabase, realProfile } = await requireAuth();
+  // Settings access follows the REAL profile — impersonation never grants or
+  // hides system configuration.
+  const isAdmin = realProfile.role === 'admin';
 
-const configDescriptions: Record<string, string> = {
-  visit_confirmation_days: 'Days before visit due date for vendor coordinator to confirm the visit',
-  report_upload_weeks: 'Weeks after visit date for report upload deadline',
-  recommendations_review_days: 'Days for maintenance engineer to create recommendations after report upload',
-  technical_review_days: 'Days for technical engineer to complete review after being assigned',
-};
+  const deadlines = await getDeadlines(supabase);
+  const initial = Object.fromEntries(
+    Object.entries(deadlines).map(([key, value]) => [key, String(value)]),
+  ) as Record<DeadlineKey, string>;
 
-const configLabels: Record<string, string> = {
-  visit_confirmation_days: 'Visit Confirmation Days',
-  report_upload_weeks: 'Report Upload Weeks',
-  recommendations_review_days: 'Recommendations Review Days',
-  technical_review_days: 'Technical Review Days',
-};
-
-export default function SettingsPage() {
-  const { realUserProfile } = useAuth();
-  const [config, setConfig] = useState<ConfigSettings>({
-    visit_confirmation_days: '14',
-    report_upload_weeks: '2',
-    recommendations_review_days: '7',
-    technical_review_days: '7',
-  });
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [generateResult, setGenerateResult] = useState<{ message: string; visits: string[] } | null>(null);
-  const supabase = createClient();
-
-  // Check if the REAL user is admin (not impersonated role)
-  const isAdmin = realUserProfile?.role === 'admin';
-
-  useEffect(() => {
-    fetchConfig();
-  }, []);
-
-  const fetchConfig = async () => {
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('system_config')
-        .select('*');
-
-      if (error) throw error;
-
-      if (data) {
-        const configMap: ConfigSettings = { ...config };
-        data.forEach((item: SystemConfig) => {
-          if (item.config_key in configMap) {
-            configMap[item.config_key as keyof ConfigSettings] = item.config_value;
-          }
-        });
-        setConfig(configMap);
-      }
-    } catch (err) {
-      console.error('Error fetching config:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSave = async () => {
-    setError(null);
-    setSuccess(null);
-
-    // Validate: every value must be a whole number between 1 and 365.
-    for (const [key, value] of Object.entries(config)) {
-      const num = Number(value);
-      if (!/^\d+$/.test(value.trim()) || !Number.isInteger(num) || num < 1 || num > 365) {
-        setError(`${configLabels[key]} must be a whole number between 1 and 365.`);
-        return;
-      }
-    }
-
-    setSaving(true);
-
-    try {
-      // Update each config value
-      for (const [key, value] of Object.entries(config)) {
-        const { error } = await supabase
-          .from('system_config')
-          .update({ config_value: value })
-          .eq('config_key', key);
-
-        if (error) {
-          // If update fails, try insert (upsert)
-          const { error: insertError } = await supabase
-            .from('system_config')
-            .insert({
-              config_key: key,
-              config_value: value,
-              description: configDescriptions[key],
-            });
-
-          if (insertError) throw insertError;
-        }
-      }
-
-      setSuccess('Settings saved successfully');
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'An error occurred';
-      setError(message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleReset = () => {
-    setConfig({
-      visit_confirmation_days: '14',
-      report_upload_weeks: '2',
-      recommendations_review_days: '7',
-      technical_review_days: '7',
-    });
-  };
-
-  const handleGenerateVisits = async () => {
-    setGenerating(true);
-    setGenerateResult(null);
-    setError(null);
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        throw new Error('Not authenticated');
-      }
-
-      const response = await fetch('/api/visits/generate', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to generate visits');
-      }
-
-      setGenerateResult({
-        message: data.message,
-        visits: data.visits || [],
-      });
-      setSuccess(data.message);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'An error occurred';
-      setError(message);
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-      </div>
-    );
-  }
+  const steps = [
+    { title: 'Visit Scheduled', text: 'Visits are created automatically from active routines, up to each routine’s call horizon.' },
+    { title: 'Date Confirmation', text: `The vendor coordinator confirms the visit date. A confirmation task is due ${deadlines.visit_confirmation_days} days before the visit.` },
+    { title: 'Report Upload', text: `After the visit, the coordinator uploads the maintenance report within ${deadlines.report_upload_weeks} week(s).` },
+    { title: 'Recommendations', text: `The maintenance engineer records recommendations within ${deadlines.recommendations_review_days} days.` },
+    { title: 'Technical Review', text: `Where required, the technical engineer reviews each recommendation within ${deadlines.technical_review_days} days.` },
+    { title: 'Completion', text: 'Once every recommendation is completed or cancelled, the visit is closed.' },
+  ];
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
-        <p className="text-gray-600">Configure system-wide settings and timelines</p>
-      </div>
+      <PageHeader title="Settings" description="Workflow deadlines and system operations" />
 
-      {error && <Alert variant="error">{error}</Alert>}
-      {success && <Alert variant="success">{success}</Alert>}
+      {!isAdmin && (
+        <Alert variant="info">Settings are read-only. Contact an administrator to change them.</Alert>
+      )}
 
       <Card>
         <CardHeader>
-          <CardTitle>Task Timeline Configuration</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <p className="text-sm text-gray-500">
-            Configure the timeline settings for maintenance workflow tasks. These values determine when tasks are created and their due dates.
-          </p>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {Object.entries(config).map(([key, value]) => (
-              <div key={key}>
-                <Input
-                  label={configLabels[key]}
-                  name={key}
-                  type="number"
-                  min={1}
-                  value={value}
-                  onChange={(e) => setConfig({ ...config, [key]: e.target.value })}
-                  disabled={!isAdmin}
-                  helperText={configDescriptions[key]}
-                />
-              </div>
-            ))}
-          </div>
-
-          {isAdmin && (
-            <div className="flex justify-end space-x-3 pt-4 border-t">
-              <Button variant="secondary" onClick={handleReset}>
-                <RefreshCw className="w-4 h-4 mr-2" />
-                Reset to Defaults
-              </Button>
-              <Button onClick={handleSave} loading={saving}>
-                <Save className="w-4 h-4 mr-2" />
-                Save Settings
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Workflow Overview</CardTitle>
+          <CardTitle className="text-base">Workflow Deadlines</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            <div className="flex items-start">
-              <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-medium">
-                1
-              </div>
-              <div className="ml-4">
-                <p className="font-medium text-gray-900">Visit Scheduled</p>
-                <p className="text-sm text-gray-500">
-                  A maintenance visit is created based on the routine schedule, {config.visit_confirmation_days} days before the scheduled date.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-start">
-              <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-medium">
-                2
-              </div>
-              <div className="ml-4">
-                <p className="font-medium text-gray-900">Date Confirmation</p>
-                <p className="text-sm text-gray-500">
-                  Vendor Coordinator confirms the visit date with the vendor.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-start">
-              <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-medium">
-                3
-              </div>
-              <div className="ml-4">
-                <p className="font-medium text-gray-900">Report Upload</p>
-                <p className="text-sm text-gray-500">
-                  Vendor Coordinator uploads the maintenance report within {config.report_upload_weeks} weeks after the visit.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-start">
-              <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-medium">
-                4
-              </div>
-              <div className="ml-4">
-                <p className="font-medium text-gray-900">Recommendations</p>
-                <p className="text-sm text-gray-500">
-                  Maintenance Engineer creates recommendations within {config.recommendations_review_days} days.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-start">
-              <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-medium">
-                5
-              </div>
-              <div className="ml-4">
-                <p className="font-medium text-gray-900">Technical Review</p>
-                <p className="text-sm text-gray-500">
-                  Technical Engineer reviews recommendations within {config.technical_review_days} days (if requested).
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-start">
-              <div className="flex-shrink-0 w-8 h-8 bg-green-100 rounded-full flex items-center justify-center text-green-600 font-medium">
-                6
-              </div>
-              <div className="ml-4">
-                <p className="font-medium text-gray-900">Completion</p>
-                <p className="text-sm text-gray-500">
-                  Recommendations are marked as complete or cancelled, and the visit is finalized.
-                </p>
-              </div>
-            </div>
-          </div>
+          <SettingsForm initial={initial} disabled={!isAdmin} />
         </CardContent>
       </Card>
 
-      {/* Admin: Generate Visits */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Workflow Overview</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ol className="space-y-3">
+            {steps.map((step, index) => (
+              <li key={step.title} className="flex gap-3">
+                <span
+                  className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white ${
+                    index === steps.length - 1 ? 'bg-green-500' : 'bg-blue-500'
+                  }`}
+                >
+                  {index + 1}
+                </span>
+                <div>
+                  <p className="text-sm font-medium text-gray-900">{step.title}</p>
+                  <p className="text-sm text-gray-500">{step.text}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </CardContent>
+      </Card>
+
       {isAdmin && (
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center">
-              <Calendar className="w-5 h-5 mr-2" />
-              Visit Generation
-            </CardTitle>
+            <CardTitle className="text-base">Visit Generation</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-gray-500">
-              Generate maintenance visits from active routines. This checks all active maintenance plans
-              and creates visits for any scheduled dates within the call horizon that don&apos;t already have visits.
+          <CardContent className="space-y-3">
+            <p className="text-sm text-gray-600">
+              Visit generation runs automatically every day at 06:00 UTC. Run it manually after creating or editing
+              routines to see their visits immediately.
             </p>
-
-            <div className="flex items-center space-x-4">
-              <Button
-                onClick={handleGenerateVisits}
-                loading={generating}
-                disabled={generating}
-              >
-                <Play className="w-4 h-4 mr-2" />
-                Generate Visits Now
-              </Button>
-            </div>
-
-            {generateResult && (
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                <p className="font-medium text-green-800">{generateResult.message}</p>
-                {generateResult.visits.length > 0 && (
-                  <ul className="mt-2 text-sm text-green-700 list-disc list-inside">
-                    {generateResult.visits.map((visit, i) => (
-                      <li key={i}>{visit}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-
-            <div className="text-xs text-gray-400 border-t pt-4">
-              <p className="font-medium mb-1">Automation:</p>
-              <p>For automatic visit generation, set up a cron job to call:</p>
-              <code className="block bg-gray-100 p-2 rounded mt-1">
-                POST /api/visits/generate
-              </code>
-              <p className="mt-1">with header: Authorization: Bearer YOUR_CRON_SECRET</p>
-            </div>
+            <GenerateVisitsButton />
+            <p className="text-xs text-gray-400">
+              Automation: the Vercel cron calls <code>POST /api/visits/generate</code>; external schedulers can use a{' '}
+              <code>CRON_SECRET</code> bearer token.
+            </p>
           </CardContent>
         </Card>
       )}
-
     </div>
   );
 }
