@@ -203,6 +203,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 .tbl tbody tr[data-href], .tbl tbody tr[data-row-modal] { cursor: pointer; }
 .tbl .num, .tbl th.num { text-align: right; }
 .tbl .actions { text-align: right; white-space: nowrap; }
+.tbl th.actions { text-align: left; }
 .tbl .actions form { display: inline; }
 /* Breathing room between adjacent row-action buttons. */
 .tbl .actions > * + *, .tbl .actions form + form, .tbl .actions form + .btn { margin-left: 0.45rem; }
