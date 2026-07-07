@@ -262,6 +262,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary-sof
 .step__label { color: var(--muted); }
 .step--done .step__label, .step--current .step__label { color: var(--text); font-weight: 600; }
 .waiting { margin-top: 0.6rem; font-size: 0.85rem; background: var(--amber-soft); border-radius: 8px; padding: 0.5rem 0.8rem; }
+.waiting--ready { background: var(--green-soft); display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
 
 /* ---- Calendar ---- */
 .cal { width: 100%; }

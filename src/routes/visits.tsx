@@ -385,6 +385,14 @@ routes.post('/:id/recommendations/:recId/review', async (c) => {
       status: done ? 'completed' : 'approved',
       completed_at: done ? now() : null,
     }, actor(c));
+    // An assigned action means that person owes a response before the
+    // recommendation can be completed — give them a task with a deadline.
+    if (!done && assignTo) {
+      const cfg = await getConfig(db);
+      await createTask(db, b.visit.id, 'review_recommendations', assignTo,
+        addDays(todayStr(), cfg.recommendations_review_days), actor(c),
+        `Respond to recommendation: ${rec.description.slice(0, 80)}`);
+    }
     await completeOpenTasks(db, b.visit.id, 'technical_review', actor(c), c.get('user').id);
     // Once nothing is left awaiting review, the ball is back with the
     // maintenance engineer — reflect that in the visit status/banner.
@@ -418,6 +426,29 @@ routes.post('/:id/recommendations/:recId/edit', async (c) => {
         description, sap_notification_number: sap || null, due_date: dueDate || null,
       }, actor(c));
       return 'Recommendation updated.';
+    }
+  );
+});
+
+routes.post('/:id/recommendations/:recId/respond', async (c) => {
+  const form = await c.req.formData();
+  const response = String(form.get('response') ?? '').trim();
+  return withVisit(
+    c,
+    () => true, // the assignee may be anyone; checked against the rec below
+    async (b) => {
+      const rec = b.recs.find((r) => r.id === c.req.param('recId'));
+      if (!rec || rec.status !== 'approved' || !rec.action_assigned_to_id) throw new Error('This recommendation is not awaiting a response.');
+      const user = c.get('user');
+      if (user.id !== rec.action_assigned_to_id && user.role !== 'admin') {
+        throw new Error('Only the assigned person can respond to this action.');
+      }
+      if (!response) throw new Error('A response is required.');
+      await updateRow(c.env.DB, 'recommendations', rec.id, {
+        action_response: response, action_responded_at: now(),
+      }, actor(c));
+      await completeOpenTasks(c.env.DB, b.visit.id, 'review_recommendations', actor(c), rec.action_assigned_to_id);
+      return 'Response recorded — the recommendation can now be completed.';
     }
   );
 });
@@ -475,11 +506,15 @@ routes.post('/:id/recommendations/:recId/complete', async (c) => {
     if (rec.review_decision === 'request_sap' && !rec.sap_notification_number) {
       throw new Error('Add the SAP notification number and due date before completing this recommendation.');
     }
+    if (rec.action_assigned_to_id && !rec.action_response) {
+      throw new Error('The assigned person must respond to the action before this recommendation can be completed.');
+    }
     const db = c.env.DB;
     await updateRow(db, 'recommendations', rec.id, { status: 'completed', completed_at: now() }, actor(c));
     const visit = (await first<Visit>(db, 'SELECT * FROM visits WHERE id = ?', b.visit.id))!;
     await maybeCreateCloseTask(db, visit, actor(c));
-    return 'Recommendation completed.';
+    const unresolved = await first(db, "SELECT id FROM recommendations WHERE visit_id = ? AND status NOT IN ('completed', 'cancelled')", b.visit.id);
+    return unresolved ? 'Recommendation completed.' : 'Recommendation completed — that was the last one, the visit is ready to close.';
   });
 });
 
@@ -497,7 +532,8 @@ routes.post('/:id/recommendations/:recId/cancel', async (c) => {
     await updateRow(db, 'recommendations', rec.id, { status: 'cancelled', cancelled_at: now(), cancellation_reason: reason }, actor(c));
     const visit = (await first<Visit>(db, 'SELECT * FROM visits WHERE id = ?', b.visit.id))!;
     await maybeCreateCloseTask(db, visit, actor(c));
-    return 'Recommendation cancelled.';
+    const unresolved = await first(db, "SELECT id FROM recommendations WHERE visit_id = ? AND status NOT IN ('completed', 'cancelled')", b.visit.id);
+    return unresolved ? 'Recommendation cancelled.' : 'Recommendation cancelled — that was the last one, the visit is ready to close.';
   });
 });
 
@@ -645,6 +681,10 @@ routes.get('/:id', async (c) => {
   const activity = buildActivity(bundle);
   const canManageRec = p.isMaintEngineer || p.isAdmin;
   const canEditRec = p.isMaintEngineer || p.isTechEngineer || p.isAdmin;
+  type Rec = VisitBundle['recs'][number];
+  const awaitingResponse = (rec: Rec) => rec.status === 'approved' && !!rec.action_assigned_to_id && !rec.action_response;
+  const canRespond = (rec: Rec) => awaitingResponse(rec) && (user.id === rec.action_assigned_to_id || p.isAdmin);
+  const sapMissing = (rec: Rec) => rec.review_decision === 'request_sap' && !rec.sap_notification_number;
 
   return page(c, `Visit ${routine.plan_number}`, (
     <>
@@ -664,7 +704,15 @@ routes.get('/:id', async (c) => {
               </div>
             ))}
           </div>
-          {waiting && <div class="waiting">Waiting for <strong>{waiting}</strong></div>}
+          {p.canClose ? (
+            <div class="waiting waiting--ready">
+              All recommendations are resolved — this visit is ready to close.
+              <ActionButton action={`/visits/${visit.id}/close`} label="Close Visit" class="btn btn--sm btn--green"
+                confirm="Close this visit? All recommendations are resolved." busy="Closing…" />
+            </div>
+          ) : (
+            waiting && <div class="waiting">Waiting for <strong>{waiting}</strong></div>
+          )}
         </Card>
       )}
 
@@ -770,6 +818,8 @@ routes.get('/:id', async (c) => {
                         </div>
                       )}
                       {rec.technical_review_response && <div class="muted">“{rec.technical_review_response}”</div>}
+                      {awaitingResponse(rec) && <div class="text-red" style="font-size:0.83rem">Awaiting response from {rec.action_assigned_name ?? 'the assignee'}</div>}
+                      {rec.action_response && <div class="muted">Response{rec.action_assigned_name ? ` from ${rec.action_assigned_name}` : ''}: {rec.action_response}</div>}
                       {rec.cancellation_reason && <div class="muted">Cancelled: {rec.cancellation_reason}</div>}
                     </td>
                     <td>{rec.sap_notification_number ?? '—'}</td>
@@ -786,13 +836,16 @@ routes.get('/:id', async (c) => {
                       {rec.status === 'in_review' && p.canReview && (
                         <button class="btn btn--sm btn--primary" data-modal={`review-${rec.id}`}>Submit Review</button>
                       )}
-                      {rec.status === 'approved' && rec.review_decision === 'request_sap' && !rec.sap_notification_number && canManageRec && (
+                      {rec.status === 'approved' && sapMissing(rec) && canManageRec && (
                         <button class="btn btn--sm btn--primary" data-modal={`sap-${rec.id}`}>Add SAP Details</button>
+                      )}
+                      {canRespond(rec) && (
+                        <button class="btn btn--sm btn--primary" data-modal={`respond-${rec.id}`}>Respond</button>
                       )}
                       {['open', 'approved'].includes(rec.status) && canManageRec && (
                         <>
-                          {/* Complete is impossible until SAP details exist, so don't offer it */}
-                          {!(rec.review_decision === 'request_sap' && !rec.sap_notification_number) && (
+                          {/* Complete is impossible until SAP details / the assignee's response exist */}
+                          {!sapMissing(rec) && !awaitingResponse(rec) && (
                             <ActionButton action={`/visits/${visit.id}/recommendations/${rec.id}/complete`} label="Complete" class="btn btn--sm btn--green" />
                           )}
                           <button class="btn btn--sm btn--danger" data-modal={`cancel-rec-${rec.id}`}>Cancel</button>
@@ -960,6 +1013,21 @@ routes.get('/:id', async (c) => {
               <Field label="Due date"><input type="date" name="due_date" required /></Field>
             </div>
             <ModalButtons submit="Save SAP Details" />
+          </form>
+        </Modal>
+      ))}
+
+      {recs.filter(canRespond).map((rec) => (
+        <Modal id={`respond-${rec.id}`} title="Respond to Assigned Action">
+          <form method="post" action={`/visits/${visit.id}/recommendations/${rec.id}/respond`}>
+            <div class="context">
+              <strong>{rec.description}</strong>
+              {rec.review_action_description && <div class="muted">Requested action: {rec.review_action_description}</div>}
+            </div>
+            <Field label="Your response" hint="Recorded on the recommendation; it can be completed once a response exists.">
+              <textarea name="response" rows={4} required placeholder="What was done, or your assessment…"></textarea>
+            </Field>
+            <ModalButtons submit="Submit Response" />
           </form>
         </Modal>
       ))}

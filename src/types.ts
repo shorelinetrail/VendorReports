@@ -106,6 +106,8 @@ export interface Recommendation {
   review_decision: ReviewDecision | null;
   review_action_description: string | null;
   action_assigned_to_id: string | null;
+  action_response: string | null;
+  action_responded_at: string | null;
   reviewed_by_id: string | null;
   reviewed_at: string | null;
   completed_at: string | null;
@@ -167,7 +169,7 @@ export const TASK_TYPE_LABELS: Record<TaskType, string> = {
   confirm_visit_date: 'Confirm Visit Date',
   upload_report: 'Upload Report',
   create_recommendations: 'Create Recommendations',
-  review_recommendations: 'Review Recommendations',
+  review_recommendations: 'Respond to Recommendation',
   technical_review: 'Technical Review',
   close_visit: 'Close Visit',
 };

@@ -66,6 +66,7 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
     ['completed', 'cancelled'].includes(r.status) && isEngineer(r) &&
     !['completed', 'cancelled'].includes(r.visit_status);
   const sapMissing = (r: RecRow) => r.review_decision === 'request_sap' && !r.sap_notification_number;
+  const awaitingResponse = (r: RecRow) => r.status === 'approved' && !!r.action_assigned_to_id && !r.action_response;
 
   return page(c, 'Recommendations', (
     <>
@@ -100,6 +101,8 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
                       <div class="desc-clip">{r.description}</div>
                       {r.review_decision && <div class="muted">Decision: {REVIEW_DECISION_LABELS[r.review_decision]}</div>}
                       {r.technical_review_response && <div class="muted">“{r.technical_review_response}”</div>}
+                      {awaitingResponse(r) && <div class="text-red" style="font-size:0.83rem">Awaiting assignee response</div>}
+                      {r.action_response && <div class="muted">Response: {r.action_response}</div>}
                     </td>
                     <td>
                       <a class="rowlink" href={`/visits/${r.visit_id}`}>{r.plan_number}</a>
@@ -117,8 +120,8 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
                       )}
                       {['open', 'approved'].includes(r.status) && canAct(r) && (
                         <>
-                          {sapMissing(r)
-                            ? <a class="btn btn--sm btn--primary" href={`/visits/${r.visit_id}`}>Add SAP Details</a>
+                          {sapMissing(r) || awaitingResponse(r)
+                            ? <a class="btn btn--sm btn--primary" href={`/visits/${r.visit_id}`}>{sapMissing(r) ? 'Add SAP Details' : 'Awaiting Response'}</a>
                             : <ActionButton action={`/visits/${r.visit_id}/recommendations/${r.id}/complete`} label="Complete" class="btn btn--sm btn--green" />}
                           <button class="btn btn--sm btn--danger" data-modal={`cancel-${r.id}`}>Cancel</button>
                         </>
