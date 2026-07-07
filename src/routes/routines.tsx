@@ -98,7 +98,6 @@ routes.get('/', async (c) => {
       <PageHeader title="Maintenance Routines" sub="Recurring plans that generate visits automatically">
         {canManage && (
           <>
-            <a class="btn" href="/routines/import/template"><Icon name="download" size={16} /> CSV Template</a>
             <button class="btn" data-modal="import"><Icon name="upload" size={16} /> Bulk Import</button>
             <button class="btn btn--primary" data-modal="create"><Icon name="plus" size={16} /> Add Routine</button>
           </>
@@ -159,10 +158,7 @@ routes.get('/', async (c) => {
           ))}
           <Modal id="import" title="Bulk Import Routines">
             <form method="post" action="/routines/import" enctype="multipart/form-data">
-              <p class="muted">
-                CSV with headers: <span class="mono">{CSV_HEADERS.join(', ')}</span>.
-                Vendors are matched by name and people by email. <a href="/routines/import/template">Download the template</a>.
-              </p>
+              <p><a href="/routines/import/template"><Icon name="download" size={14} /> Download the CSV template</a></p>
               <Field label="CSV file"><input type="file" name="file" accept=".csv" required /></Field>
               <ModalButtons submit="Import" busy="Importing…" />
             </form>

@@ -30,7 +30,6 @@ routes.get('/users', admin, async (c) => {
   return page(c, 'Users', (
     <>
       <PageHeader title="Users" sub="Accounts are created here - there is no self-signup">
-        <a class="btn" href="/users/import/template"><Icon name="download" size={16} /> CSV Template</a>
         <button class="btn" data-modal="import"><Icon name="upload" size={16} /> Bulk Import</button>
         <button class="btn btn--primary" data-modal="create"><Icon name="plus" size={16} /> Add User</button>
       </PageHeader>
@@ -113,10 +112,7 @@ routes.get('/users', admin, async (c) => {
 
       <Modal id="import" title="Bulk Import Users">
         <form method="post" action="/users/import" enctype="multipart/form-data">
-          <p class="muted">
-            CSV with headers: <span class="mono">full_name, email, role, password</span>.
-            Role is one of <span class="mono">{ROLES.join(', ')}</span>; passwords need 8+ characters.
-          </p>
+          <p><a href="/users/import/template"><Icon name="download" size={14} /> Download the CSV template</a></p>
           <Field label="CSV file"><input type="file" name="file" accept=".csv" required /></Field>
           <ModalButtons submit="Import" busy="Importing…" />
         </form>
@@ -302,7 +298,7 @@ routes.get('/vendors', admin, async (c) => {
       ))}
       <Modal id="import" title="Bulk Import Vendors">
         <form method="post" action="/vendors/import" enctype="multipart/form-data">
-          <p class="muted">CSV with headers: <span class="mono">name, vendor_number, contact_name, contact_email, contact_phone, address</span> (only name is required).</p>
+          <p><a href="/vendors/import/template"><Icon name="download" size={14} /> Download the CSV template</a></p>
           <Field label="CSV file"><input type="file" name="file" accept=".csv" required /></Field>
           <ModalButtons submit="Import" busy="Importing…" />
         </form>
@@ -499,6 +495,12 @@ routes.post('/vendors', admin, async (c) => {
   }
   return c.redirect('/vendors');
 });
+
+routes.get('/vendors/import/template', admin, () =>
+  csvResponse('vendors-template.csv', [
+    ['name', 'vendor_number', 'contact_name', 'contact_email', 'contact_phone', 'address'],
+    ['Acme Industrial', '100234', 'Sam Acme', 'info@acme.example', '+44 20 7946 0000', '1 Factory Lane, Sheffield'],
+  ]));
 
 routes.post('/vendors/import', admin, async (c) => {
   const form = await c.req.formData();
