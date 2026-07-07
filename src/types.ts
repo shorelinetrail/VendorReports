@@ -26,11 +26,16 @@ export interface User {
   email: string;
   full_name: string;
   role: UserRole;
+  /** Admin rights on top of the functional role (the 'admin' role implies it). */
+  is_admin: number;
   password_hash: string;
   is_active: number;
   created_at: string;
   updated_at: string;
 }
+
+/** The one check for admin powers: the pure admin role, or an admin flag on any role. */
+export const isAdmin = (u: Pick<User, 'role' | 'is_admin'>) => u.role === 'admin' || !!u.is_admin;
 
 export interface Vendor {
   id: string;

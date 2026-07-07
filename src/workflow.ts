@@ -1,6 +1,6 @@
 import { all, first, run, insertRow, updateRow, now } from './db';
 import { addDays, addMonths, todayStr } from './dates';
-import type { Recommendation, Routine, Task, TaskType, User, Visit } from './types';
+import { isAdmin as isAdminUser, type Recommendation, type Routine, type Task, type TaskType, type User, type Visit } from './types';
 
 // ---- System configuration ----
 
@@ -192,7 +192,7 @@ export interface VisitPerms {
 }
 
 export function visitPerms(user: User, visit: Visit, reportCount: number, recs: Recommendation[]): VisitPerms {
-  const isAdmin = user.role === 'admin';
+  const isAdmin = isAdminUser(user);
   const isCoordinator = user.id === visit.vendor_coordinator_id;
   const isMaintEngineer = user.id === visit.maintenance_engineer_id;
   const isTechEngineer = user.id === visit.technical_engineer_id;

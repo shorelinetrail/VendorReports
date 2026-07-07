@@ -16,7 +16,7 @@ import {
   page, Card, PageHeader, EmptyState, Modal, ModalButtons, Field, ActionButton, Badge, visitBadge, recBadge, Icon,
 } from '../ui';
 import {
-  REVIEW_DECISION_LABELS, ROLE_LABELS, TASK_TYPE_LABELS, VISIT_STATUS_LABELS,
+  isAdmin, REVIEW_DECISION_LABELS, ROLE_LABELS, TASK_TYPE_LABELS, VISIT_STATUS_LABELS,
   type App, type Recommendation, type Routine, type Task, type User, type Vendor, type Visit, type VisitReport, type VisitStatus,
 } from '../types';
 import type { Context } from 'hono';
@@ -34,7 +34,7 @@ routes.get('/', async (c) => {
   const statusFilter = c.req.query('status') ?? 'all';
   const q = (c.req.query('q') ?? '').trim();
   const mine = c.req.query('mine') === '1';
-  const canManage = user.role === 'admin' || user.role === 'vendor_coordinator';
+  const canManage = isAdmin(user) || user.role === 'vendor_coordinator';
 
   const where: string[] = [];
   const params: unknown[] = [];
@@ -108,7 +108,7 @@ routes.get('/', async (c) => {
                     <td>{visitBadge(v.status)}</td>
                     <td class="actions">
                       <a class="btn btn--sm" href={`/visits/${v.id}`}>Open</a>
-                      {user.role === 'admin' && (
+                      {isAdmin(user) && (
                         <ActionButton
                           action={`/visits/${v.id}/delete`}
                           label="Delete"
@@ -147,7 +147,7 @@ routes.get('/', async (c) => {
 
 routes.post('/', async (c) => {
   const user = c.get('user');
-  if (user.role !== 'admin' && user.role !== 'vendor_coordinator') return c.text('Forbidden', 403);
+  if (!isAdmin(user) && user.role !== 'vendor_coordinator') return c.text('Forbidden', 403);
   const form = await c.req.formData();
   const routineId = String(form.get('routine_id') ?? '');
   const date = String(form.get('scheduled_date') ?? '');
@@ -492,7 +492,7 @@ routes.post('/:id/recommendations/:recId/respond', async (c) => {
       const rec = b.recs.find((r) => r.id === c.req.param('recId'));
       if (!rec || rec.status !== 'approved' || !rec.action_assigned_to_id) throw new Error('This recommendation is not awaiting a response.');
       const user = c.get('user');
-      if (user.id !== rec.action_assigned_to_id && user.role !== 'admin') {
+      if (user.id !== rec.action_assigned_to_id && !isAdmin(user)) {
         throw new Error('Only the assigned person can respond to this action.');
       }
       if (!response) throw new Error('A response is required.');
@@ -721,7 +721,7 @@ routes.post('/:id/reassign', async (c) => {
 
 routes.post('/:id/delete', async (c) => {
   const user = c.get('realUser');
-  if (user.role !== 'admin') return c.text('Forbidden', 403);
+  if (!isAdmin(user)) return c.text('Forbidden', 403);
   const id = c.req.param('id')!;
   const reports = await all<VisitReport>(c.env.DB, 'SELECT * FROM visit_reports WHERE visit_id = ?', id);
   for (const r of reports) await c.env.REPORTS.delete(r.file_key);
@@ -1148,7 +1148,7 @@ routes.get('/:id', async (c) => {
             ).map(([label, name, role, current]) => (
               <Field label={label}>
                 <select name={name} required>
-                  {users.filter((u) => u.role === role || u.role === 'admin' || u.id === current).map((u) => (
+                  {users.filter((u) => u.role === role || isAdmin(u) || u.id === current).map((u) => (
                     <option value={u.id} selected={u.id === current}>{u.full_name} ({ROLE_LABELS[u.role]})</option>
                   ))}
                 </select>

@@ -204,6 +204,9 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 .tbl .num, .tbl th.num { text-align: right; }
 .tbl .actions { text-align: right; white-space: nowrap; }
 .tbl .actions form { display: inline; }
+/* Breathing room between adjacent row-action buttons. */
+.tbl .actions > * + *, .tbl .actions form + form, .tbl .actions form + .btn { margin-left: 0.45rem; }
+.tbl .actions .btn { margin-bottom: 2px; }
 .tbl a.rowlink { font-weight: 600; }
 
 /* ---- Filter bar ---- */

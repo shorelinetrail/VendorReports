@@ -2,7 +2,7 @@ import { createMiddleware } from 'hono/factory';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { Context } from 'hono';
 import { all, first, run, now } from './db';
-import type { App, User, UserRole } from './types';
+import { isAdmin, type App, type User, type UserRole } from './types';
 
 const SESSION_COOKIE = 'vt_session';
 const SESSION_DAYS = 30;
@@ -99,7 +99,7 @@ export const requireAuth = createMiddleware<App>(async (c, next) => {
       const realUser = await first<User>(c.env.DB, 'SELECT * FROM users WHERE id = ? AND is_active = 1', session.user_id);
       if (realUser) {
         let user = realUser;
-        if (session.impersonating_id && realUser.role === 'admin') {
+        if (session.impersonating_id && isAdmin(realUser)) {
           const target = await first<User>(c.env.DB, 'SELECT * FROM users WHERE id = ?', session.impersonating_id);
           if (target) user = target;
         }
@@ -120,8 +120,9 @@ export const requireAuth = createMiddleware<App>(async (c, next) => {
 /** Route guard for role-restricted pages. Checks the REAL user so impersonation cannot escalate. */
 export const requireRole = (...roles: UserRole[]) =>
   createMiddleware<App>(async (c, next) => {
-    if (!roles.includes(c.get('realUser').role)) return c.text('Forbidden', 403);
-    return next();
+    const user = c.get('realUser');
+    if (roles.includes(user.role) || (roles.includes('admin') && isAdmin(user))) return next();
+    return c.text('Forbidden', 403);
   });
 
 export async function findUserByEmail(db: D1Database, email: string): Promise<User | null> {

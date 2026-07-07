@@ -3,7 +3,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 import { all, first } from '../db';
 import { addDays, fmtDate, monthStart, todayStr } from '../dates';
 import { page, StatCard, Card, EmptyState, taskBadge, visitBadge, isTaskOverdue } from '../ui';
-import { TASK_TYPE_LABELS, VISIT_STATUS_LABELS } from '../types';
+import { isAdmin, TASK_TYPE_LABELS, VISIT_STATUS_LABELS } from '../types';
 import type { App, TaskStatus, TaskType, VisitStatus } from '../types';
 
 interface CalVisit { id: string; scheduled_date: string; status: VisitStatus; plan_number: string; vendor_name: string; description: string }
@@ -90,7 +90,7 @@ routes.get('/', async (c) => {
   // Stalled visits: open visits whose workflow task is past due - the chase-up
   // view for coordinators/admins (assignees already see their own overdue tasks).
   let needsAttention: { id: string; status: VisitStatus; plan_number: string; vendor_name: string; task_type: TaskType; due_date: string; assignee_name: string }[] = [];
-  if (user.role === 'admin' || user.role === 'vendor_coordinator') {
+  if (isAdmin(user) || user.role === 'vendor_coordinator') {
     const rows = await all<(typeof needsAttention)[number]>(
       db,
       `SELECT v.id, v.status, r.plan_number, ve.name AS vendor_name, t.task_type, t.due_date, u.full_name AS assignee_name

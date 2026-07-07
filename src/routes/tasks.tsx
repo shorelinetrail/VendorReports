@@ -4,7 +4,7 @@ import { all, first, updateRow, now } from '../db';
 import { fmtDate, todayStr } from '../dates';
 import { flash } from '../auth';
 import { page, Card, PageHeader, EmptyState, StatCard, taskBadge, isTaskOverdue } from '../ui';
-import { TASK_TYPE_LABELS, type App, type Task, type TaskStatus, type TaskType } from '../types';
+import { isAdmin, TASK_TYPE_LABELS, type App, type Task, type TaskStatus, type TaskType } from '../types';
 
 const routes = new Hono<App>();
 
@@ -24,7 +24,7 @@ routes.get('/', async (c) => {
   const db = c.env.DB;
   const user = c.get('user');
   const filter = c.req.query('status') ?? 'open';
-  const showAll = c.req.query('all') === '1' && user.role === 'admin';
+  const showAll = c.req.query('all') === '1' && isAdmin(user);
   const today = todayStr();
 
   const tasks = await all<TaskRow>(
@@ -71,7 +71,7 @@ routes.get('/', async (c) => {
           <select name="status" data-autosubmit aria-label="Filter tasks">
             {FILTERS.map((f) => <option value={f.value} selected={filter === f.value}>{f.label}</option>)}
           </select>
-          {user.role === 'admin' && (
+          {isAdmin(user) && (
             <label class="check" style="margin:0">
               <input type="checkbox" name="all" value="1" checked={showAll} data-autosubmit /> Show all users
             </label>
@@ -90,7 +90,7 @@ routes.get('/', async (c) => {
               </thead>
               <tbody>
                 {visible.map((t) => {
-                  const mine = t.assigned_to_id === user.id || user.role === 'admin';
+                  const mine = t.assigned_to_id === user.id || isAdmin(user);
                   const open = ['pending', 'in_progress', 'overdue'].includes(t.status);
                   return (
                     <tr data-href={`/visits/${t.visit_id}`}>
@@ -134,7 +134,7 @@ async function transition(c: Context<App, '/:id/start' | '/:id/complete'>, allow
   const user = c.get('user');
   const task = await first<Task>(c.env.DB, 'SELECT * FROM tasks WHERE id = ?', c.req.param('id'));
   const back = c.req.header('referer')?.includes('/visits/') ? `/visits/${task?.visit_id}` : '/tasks';
-  if (!task || (task.assigned_to_id !== user.id && user.role !== 'admin')) {
+  if (!task || (task.assigned_to_id !== user.id && !isAdmin(user))) {
     flash(c, 'You can only update tasks assigned to you.', 'err');
     return c.redirect(back);
   }

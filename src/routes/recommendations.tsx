@@ -4,7 +4,7 @@ import { all } from '../db';
 import { fmtDate, todayStr } from '../dates';
 import { activeUsers, requireRole } from '../auth';
 import { page, Card, PageHeader, EmptyState, StatCard, Modal, ModalButtons, Field, ActionButton, recBadge } from '../ui';
-import { REVIEW_DECISION_LABELS, ROLE_LABELS, type App, type Recommendation } from '../types';
+import { isAdmin, REVIEW_DECISION_LABELS, ROLE_LABELS, type App, type Recommendation } from '../types';
 
 const routes = new Hono<App>();
 
@@ -53,14 +53,14 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
     if (filter === 'active') return ['open', 'in_review', 'approved'].includes(r.status);
     return r.status === filter;
   });
-  const canReview = user.role === 'admin' || user.role === 'technical_engineer';
+  const canReview = isAdmin(user) || user.role === 'technical_engineer';
   const reviewable = visible.filter((r) => r.status === 'in_review' && canReview);
   const users = reviewable.length > 0 ? await activeUsers(c.env.DB) : [];
   // Complete/cancel belong to the visit's maintenance engineer (or an admin);
   // reviewing is the technical engineer's only recommendation action.
-  const canAct = (r: RecRow) => user.role === 'admin' || user.id === r.maintenance_engineer_id;
+  const canAct = (r: RecRow) => isAdmin(user) || user.id === r.maintenance_engineer_id;
   const isEngineer = (r: RecRow) =>
-    user.role === 'admin' || user.id === r.maintenance_engineer_id || user.id === r.technical_engineer_id;
+    isAdmin(user) || user.id === r.maintenance_engineer_id || user.id === r.technical_engineer_id;
   const canEdit = (r: RecRow) => !['completed', 'cancelled'].includes(r.status) && isEngineer(r);
   const canReopen = (r: RecRow) =>
     ['completed', 'cancelled'].includes(r.status) && isEngineer(r) &&

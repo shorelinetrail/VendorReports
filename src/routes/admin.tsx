@@ -6,7 +6,7 @@ import { findUserByEmail, flash, hashPassword, requireRole } from '../auth';
 import { parseCsv, csvObjects, csvResponse } from '../csv';
 import { CONFIG_DEFAULTS, expireTasks, generateVisits, getConfig, setConfigValue, type ConfigKey } from '../workflow';
 import { page, Card, PageHeader, EmptyState, Modal, ModalButtons, Field, ActionButton, Badge, Icon } from '../ui';
-import { ROLES, ROLE_LABELS, type App, type User, type UserRole, type Vendor } from '../types';
+import { isAdmin, ROLES, ROLE_LABELS, type App, type User, type UserRole, type Vendor } from '../types';
 
 const routes = new Hono<App>();
 const admin = requireRole('admin');
@@ -41,7 +41,10 @@ routes.get('/users', admin, async (c) => {
                 <tr data-row-modal={`edit-${u.id}`}>
                   <td><strong>{u.full_name}</strong>{u.id === me.id && <span class="muted"> (you)</span>}</td>
                   <td>{u.email}</td>
-                  <td><Badge tone={ROLE_TONES[u.role]}>{ROLE_LABELS[u.role]}</Badge></td>
+                  <td>
+                    <Badge tone={ROLE_TONES[u.role]}>{ROLE_LABELS[u.role]}</Badge>
+                    {u.role !== 'admin' && !!u.is_admin && <>{' '}<Badge tone="red">Admin</Badge></>}
+                  </td>
                   <td>{u.is_active ? <Badge tone="green">Active</Badge> : <Badge tone="gray">Inactive</Badge>}</td>
                   <td>{fmtDate(u.created_at)}</td>
                   <td class="actions">
@@ -71,6 +74,9 @@ routes.get('/users', admin, async (c) => {
             <input name="password" required minlength={8} />
           </Field>
           <Field label="Role"><select name="role" required>{roleOptions()}</select></Field>
+          <label class="check">
+            <input type="checkbox" name="is_admin" /> Also grant admin access (full admin view on top of their role)
+          </label>
           <ModalButtons submit="Create User" />
         </form>
       </Modal>
@@ -82,7 +88,11 @@ routes.get('/users', admin, async (c) => {
               <Field label="Full name"><input name="full_name" required value={u.full_name} /></Field>
               <Field label="Email" hint="Email can't be changed."><input value={u.email} disabled /></Field>
               <Field label="Role"><select name="role" required disabled={u.id === me.id}>{roleOptions(u.role)}</select></Field>
-              {u.id === me.id && <p class="muted">You can't change your own role.</p>}
+              <label class="check">
+                <input type="checkbox" name="is_admin" checked={!!u.is_admin} disabled={u.id === me.id || u.role === 'admin'} />
+                Also grant admin access
+              </label>
+              {u.id === me.id && <p class="muted">You can't change your own role or admin access.</p>}
               <ModalButtons submit="Save Changes" />
             </form>
           </Modal>
@@ -124,6 +134,7 @@ routes.post('/users', admin, async (c) => {
   } else {
     await insertRow(c.env.DB, 'users', {
       email, full_name: fullName, role, password_hash: await hashPassword(password), is_active: 1,
+      is_admin: role !== 'admin' && form.has('is_admin') ? 1 : 0,
     }, c.get('realUser').id);
     flash(c, `User ${fullName} created.`);
   }
@@ -207,7 +218,10 @@ routes.post('/users/:id', admin, async (c) => {
     flash(c, 'A name is required.', 'err');
   } else {
     const patch: Record<string, unknown> = { full_name: fullName };
-    if (user.id !== me.id && ROLES.includes(role)) patch.role = role;
+    if (user.id !== me.id && ROLES.includes(role)) {
+      patch.role = role;
+      patch.is_admin = role !== 'admin' && form.has('is_admin') ? 1 : 0;
+    }
     await updateRow(c.env.DB, 'users', user.id, patch, me.id);
     flash(c, `${fullName} updated.`);
   }

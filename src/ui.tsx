@@ -7,7 +7,7 @@ import { all } from './db';
 import { fmtDate } from './dates';
 import { todayStr } from './dates';
 import {
-  ROLE_LABELS, TASK_TYPE_LABELS, VISIT_STATUS_LABELS, REC_STATUS_LABELS,
+  isAdmin, ROLE_LABELS, TASK_TYPE_LABELS, VISIT_STATUS_LABELS, REC_STATUS_LABELS,
   type App, type RecommendationStatus, type TaskStatus, type TaskType, type User, type UserRole, type VisitStatus,
 } from './types';
 
@@ -191,7 +191,7 @@ async function getNotifications(c: Context<App>): Promise<Notification[]> {
       overdue: isTaskOverdue(t.status, t.due_date), href: `/visits/${t.visit_id}`,
     });
   }
-  if (user.role === 'admin' || user.role === 'technical_engineer') {
+  if (isAdmin(user) || user.role === 'technical_engineer') {
     const recs = await all<{ id: string; description: string; visit_id: string; plan_number: string }>(
       c.env.DB,
       `SELECT rec.id, rec.description, rec.visit_id, r.plan_number
@@ -215,7 +215,7 @@ export async function page(c: Context<App>, title: string, body: Child) {
   const isImpersonating = user.id !== realUser.id;
   const flash = takeFlash(c);
   const path = new URL(c.req.url).pathname;
-  const impUsers = realUser.role === 'admin' ? (await activeUsers(c.env.DB)).filter((u) => u.id !== realUser.id) : [];
+  const impUsers = isAdmin(realUser) ? (await activeUsers(c.env.DB)).filter((u) => u.id !== realUser.id) : [];
   const notifications = await getNotifications(c);
   const overdueCount = notifications.filter((n) => n.overdue).length;
 
@@ -237,7 +237,7 @@ export async function page(c: Context<App>, title: string, body: Child) {
               <span>VendorTrak</span>
             </div>
             <nav class="sidebar__nav" aria-label="Main">
-              {NAV.filter((n) => !n.roles || n.roles.includes(user.role)).map((n) => {
+              {NAV.filter((n) => !n.roles || n.roles.includes(user.role) || (n.roles.includes('admin') && isAdmin(user))).map((n) => {
                 const active = n.href === '/' ? path === '/' : path === n.href || path.startsWith(n.href + '/');
                 return (
                   <a href={n.href} class={`nav-item ${active ? 'nav-item--active' : ''}`} aria-current={active ? 'page' : undefined}>
@@ -249,7 +249,7 @@ export async function page(c: Context<App>, title: string, body: Child) {
             <div class="sidebar__foot">
               <div class="sidebar__user">
                 <strong>{user.full_name}</strong>
-                <span>{ROLE_LABELS[user.role]}</span>
+                <span>{ROLE_LABELS[user.role]}{user.role !== 'admin' && isAdmin(user) ? ' · Admin' : ''}</span>
               </div>
               <form method="post" action="/logout">
                 <button type="submit" class="nav-item nav-item--button"><Icon name="logout" /> Sign out</button>
@@ -258,7 +258,7 @@ export async function page(c: Context<App>, title: string, body: Child) {
           </aside>
 
           <div class="main">
-            {realUser.role === 'admin' && (
+            {isAdmin(realUser) && (
               <div class={`imp-bar ${isImpersonating ? 'imp-bar--active' : ''}`}>
                 {isImpersonating ? (
                   <>

@@ -5,7 +5,7 @@ import { addMonths, fmtDate, todayStr } from '../dates';
 import { activeUsers, findUserByEmail, flash, requireRole } from '../auth';
 import { parseCsv, csvObjects, csvResponse } from '../csv';
 import { page, Card, PageHeader, EmptyState, Modal, ModalButtons, Field, ActionButton, Badge, Icon } from '../ui';
-import { ROLE_LABELS, type App, type Routine, type User, type Vendor } from '../types';
+import { isAdmin, ROLE_LABELS, type App, type Routine, type User, type Vendor } from '../types';
 
 const routes = new Hono<App>();
 const manage = requireRole('admin', 'vendor_coordinator');
@@ -27,7 +27,7 @@ function RoutineForm({ action, routine, vendors, users, submit }: {
   action: string; routine?: Routine; vendors: Vendor[]; users: User[]; submit: string;
 }) {
   const byRole = (role: string, current?: string) =>
-    users.filter((u) => u.role === role || u.role === 'admin' || u.id === current);
+    users.filter((u) => u.role === role || isAdmin(u) || u.id === current);
   return (
     <form method="post" action={action}>
       <div class="form-grid">
@@ -77,7 +77,7 @@ function RoutineForm({ action, routine, vendors, users, submit }: {
 
 routes.get('/', async (c) => {
   const db = c.env.DB;
-  const canManage = ['admin', 'vendor_coordinator'].includes(c.get('user').role);
+  const canManage = isAdmin(c.get('user')) || c.get('user').role === 'vendor_coordinator';
   const [routinesList, vendors, users] = await Promise.all([
     all<RoutineRow>(
       db,
