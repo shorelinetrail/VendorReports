@@ -1,371 +1,183 @@
-'use client';
-
-import { useEffect, useState } from 'react';
-import { CheckCircle, Clock, AlertTriangle, Eye } from 'lucide-react';
-import { format, isBefore, isToday, addDays } from 'date-fns';
-import { createClient } from '@/lib/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
-import { Task, TaskStatus, TaskType } from '@/types/database';
-import Button from '@/components/ui/Button';
+import { differenceInCalendarDays } from 'date-fns';
+import { AlertTriangle, CheckCircle, Clock, ListTodo } from 'lucide-react';
+import { requireAuth, hasRole } from '@/lib/auth';
+import {
+  asDate,
+  formatDate,
+  isOverdue,
+  TASK_TYPE_LABELS,
+  type BadgeVariant,
+} from '@/lib/labels';
+import PageHeader from '@/components/ui/PageHeader';
+import StatCard from '@/components/ui/StatCard';
 import Badge from '@/components/ui/Badge';
-import Select from '@/components/ui/Select';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
-import Link from 'next/link';
+import EmptyState from '@/components/ui/EmptyState';
+import FilterSelect from '@/components/ui/FilterSelect';
+import { Card, CardContent } from '@/components/ui/Card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
+import TaskRowActions from './TaskRowActions';
+import ShowAllToggle from './ShowAllToggle';
+import type { TaskStatus, TaskType } from '@/types/database';
 
-interface TaskWithDetails extends Omit<Task, 'visit' | 'assigned_to'> {
+interface TaskRow {
+  id: string;
+  task_type: TaskType;
+  due_date: string;
+  status: TaskStatus;
   visit: {
     id: string;
-    scheduled_date: string;
-    routine: {
-      plan_number: string;
-      description: string;
-      vendor: { name: string };
-    };
-  };
-  assigned_to: {
-    full_name: string;
-  };
+    routine: { plan_number: string; description: string; vendor: { name: string } | null } | null;
+  } | null;
+  assigned_to: { full_name: string } | null;
 }
 
-export default function TasksPage() {
-  const { userProfile, hasRole, loading: authLoading } = useAuth();
-  const [tasks, setTasks] = useState<TaskWithDetails[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<string>('pending');
-  const [showAllUsers, setShowAllUsers] = useState(false);
-  const supabase = createClient();
+const TASK_TYPE_COLORS: Record<TaskType, string> = {
+  confirm_visit_date: 'bg-blue-100 text-blue-800',
+  upload_report: 'bg-purple-100 text-purple-800',
+  create_recommendations: 'bg-green-100 text-green-800',
+  review_recommendations: 'bg-yellow-100 text-yellow-800',
+  technical_review: 'bg-orange-100 text-orange-800',
+  close_visit: 'bg-emerald-100 text-emerald-800',
+};
 
-  const isAdmin = hasRole('admin');
+function statusInfo(task: TaskRow): { variant: BadgeVariant; label: string } {
+  if (task.status === 'completed') return { variant: 'completed', label: 'Completed' };
+  if (task.status === 'cancelled') return { variant: 'cancelled', label: 'Cancelled' };
+  if (task.status === 'overdue' || isOverdue(task.due_date)) return { variant: 'overdue', label: 'Overdue' };
+  const daysLeft = differenceInCalendarDays(asDate(task.due_date), new Date());
+  if (daysLeft === 0) return { variant: 'warning', label: 'Due Today' };
+  if (daysLeft <= 3) return { variant: 'warning', label: 'Due Soon' };
+  if (task.status === 'in_progress') return { variant: 'in_progress', label: 'In Progress' };
+  return { variant: 'pending', label: 'Pending' };
+}
 
-  useEffect(() => {
-    fetchTasks();
-  }, [userProfile, showAllUsers, authLoading]);
+export default async function TasksPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string; scope?: string }>;
+}) {
+  const { supabase, profile } = await requireAuth();
+  const params = await searchParams;
 
-  const fetchTasks = async () => {
-    // Wait for auth to finish loading
-    if (authLoading) return;
+  const isAdmin = hasRole(profile, 'admin');
+  const showAll = isAdmin && params.scope === 'all';
+  const statusFilter = params.status ?? 'pending';
 
-    // If no user profile after auth loaded, stop loading
-    if (!userProfile) {
-      setLoading(false);
-      return;
-    }
+  let query = supabase
+    .from('tasks')
+    .select(
+      'id, task_type, due_date, status, visit:maintenance_visits(id, routine:maintenance_routines(plan_number, description, vendor:vendors(name))), assigned_to:users!tasks_assigned_to_id_fkey(full_name)',
+    )
+    .order('due_date', { ascending: true });
+  if (!showAll) query = query.eq('assigned_to_id', profile.id);
 
-    setLoading(true);
-    try {
-      let query = supabase
-        .from('tasks')
-        .select(`
-          *,
-          visit:maintenance_visits(
-            id,
-            scheduled_date,
-            routine:maintenance_routines(
-              plan_number,
-              description,
-              vendor:vendors(name)
-            )
-          ),
-          assigned_to:users!tasks_assigned_to_id_fkey(full_name)
-        `)
-        .order('due_date', { ascending: true });
+  const { data } = await query;
+  const tasks = (data ?? []) as unknown as TaskRow[];
 
-      if (!showAllUsers) {
-        query = query.eq('assigned_to_id', userProfile.id);
-      }
-
-      const { data, error } = await query;
-
-      if (error) throw error;
-      setTasks(data as unknown as TaskWithDetails[]);
-    } catch (err) {
-      console.error('Error fetching tasks:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCompleteTask = async (taskId: string) => {
-    try {
-      const { error } = await supabase
-        .from('tasks')
-        .update({
-          status: 'completed' as TaskStatus,
-          completed_at: new Date().toISOString(),
-        })
-        .eq('id', taskId);
-
-      if (error) throw error;
-      await fetchTasks();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'An error occurred';
-      alert(message);
-    }
-  };
-
-  const handleStartTask = async (taskId: string) => {
-    try {
-      const { error } = await supabase
-        .from('tasks')
-        .update({ status: 'in_progress' as TaskStatus })
-        .eq('id', taskId);
-
-      if (error) throw error;
-      await fetchTasks();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'An error occurred';
-      alert(message);
-    }
-  };
-
-  const formatTaskType = (type: TaskType): string => {
-    const labels: Record<TaskType, string> = {
-      confirm_visit_date: 'Confirm Visit Date',
-      upload_report: 'Upload Report',
-      create_recommendations: 'Create Recommendations',
-      review_recommendations: 'Review Recommendations',
-      technical_review: 'Technical Review',
-      close_visit: 'Close Visit',
-    };
-    return labels[type] || type;
-  };
-
-  const getTaskTypeColor = (type: TaskType): string => {
-    const colors: Record<TaskType, string> = {
-      confirm_visit_date: 'bg-blue-100 text-blue-800',
-      upload_report: 'bg-purple-100 text-purple-800',
-      create_recommendations: 'bg-green-100 text-green-800',
-      review_recommendations: 'bg-yellow-100 text-yellow-800',
-      technical_review: 'bg-orange-100 text-orange-800',
-      close_visit: 'bg-emerald-100 text-emerald-800',
-    };
-    return colors[type] || 'bg-gray-100 text-gray-800';
-  };
-
-  const getStatusInfo = (task: TaskWithDetails) => {
-    const today = new Date();
-    const dueDate = new Date(task.due_date);
-
-    if (task.status === 'completed') {
-      return { variant: 'completed' as const, label: 'Completed' };
-    }
-    if (task.status === 'cancelled') {
-      return { variant: 'cancelled' as const, label: 'Cancelled' };
-    }
-    if (isBefore(dueDate, today)) {
-      return { variant: 'overdue' as const, label: 'Overdue' };
-    }
-    if (isToday(dueDate)) {
-      return { variant: 'warning' as const, label: 'Due Today' };
-    }
-    if (isBefore(dueDate, addDays(today, 3))) {
-      return { variant: 'warning' as const, label: 'Due Soon' };
-    }
-    if (task.status === 'in_progress') {
-      return { variant: 'in_progress' as const, label: 'In Progress' };
-    }
-    return { variant: 'pending' as const, label: 'Pending' };
-  };
-
-  const filteredTasks = tasks.filter((task) => {
-    if (statusFilter === 'all') return true;
-    if (statusFilter === 'overdue') {
-      return isBefore(new Date(task.due_date), new Date()) && task.status !== 'completed' && task.status !== 'cancelled';
-    }
-    return task.status === statusFilter;
-  });
-
-  const statusOptions = [
-    { value: 'all', label: 'All Tasks' },
-    { value: 'pending', label: 'Pending' },
-    { value: 'in_progress', label: 'In Progress' },
-    { value: 'overdue', label: 'Overdue' },
-    { value: 'completed', label: 'Completed' },
-    { value: 'cancelled', label: 'Cancelled' },
-  ];
-
-  const taskCounts = {
+  const counts = {
     pending: tasks.filter((t) => t.status === 'pending').length,
-    in_progress: tasks.filter((t) => t.status === 'in_progress').length,
-    overdue: tasks.filter((t) => isBefore(new Date(t.due_date), new Date()) && t.status !== 'completed' && t.status !== 'cancelled').length,
+    inProgress: tasks.filter((t) => t.status === 'in_progress').length,
+    overdue: tasks.filter((t) => t.status === 'overdue' || isOverdue(t.due_date, t.status)).length,
     completed: tasks.filter((t) => t.status === 'completed').length,
   };
 
-  // Only show loading spinner during initial auth check
-  if (authLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-      </div>
-    );
-  }
+  const filtered = tasks.filter((t) => {
+    if (statusFilter === 'all') return true;
+    if (statusFilter === 'overdue') return t.status === 'overdue' || isOverdue(t.due_date, t.status);
+    return t.status === statusFilter;
+  });
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">My Tasks</h1>
-          <p className="text-gray-600">Manage your assigned maintenance tasks</p>
-        </div>
+      <PageHeader title="My Tasks" description="Workflow steps assigned to you, ordered by due date" />
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard title="Pending" value={counts.pending} icon={Clock} color="yellow" href="/tasks?status=pending" />
+        <StatCard title="In Progress" value={counts.inProgress} icon={Clock} color="blue" href="/tasks?status=in_progress" />
+        <StatCard title="Overdue" value={counts.overdue} icon={AlertTriangle} color="red" href="/tasks?status=overdue" />
+        <StatCard title="Completed" value={counts.completed} icon={CheckCircle} color="green" href="/tasks?status=completed" />
       </div>
 
-      {/* Task Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center">
-              <Clock className="w-8 h-8 text-yellow-500" />
-              <div className="ml-3">
-                <p className="text-sm text-gray-500">Pending</p>
-                <p className="text-2xl font-bold">{taskCounts.pending}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center">
-              <Clock className="w-8 h-8 text-blue-500" />
-              <div className="ml-3">
-                <p className="text-sm text-gray-500">In Progress</p>
-                <p className="text-2xl font-bold">{taskCounts.in_progress}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center">
-              <AlertTriangle className="w-8 h-8 text-red-500" />
-              <div className="ml-3">
-                <p className="text-sm text-gray-500">Overdue</p>
-                <p className="text-2xl font-bold">{taskCounts.overdue}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center">
-              <CheckCircle className="w-8 h-8 text-green-500" />
-              <div className="ml-3">
-                <p className="text-sm text-gray-500">Completed</p>
-                <p className="text-2xl font-bold">{taskCounts.completed}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Filters */}
       <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center space-x-4">
-            <div className="w-48">
-              <Select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                options={statusOptions}
-              />
-            </div>
-            {isAdmin && (
-              <label className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  checked={showAllUsers}
-                  onChange={(e) => setShowAllUsers(e.target.checked)}
-                  className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
-                />
-                <span className="text-sm text-gray-600">Show all users tasks</span>
-              </label>
-            )}
-            <span className="text-sm text-gray-500">
-              Showing {filteredTasks.length} tasks
-            </span>
+        <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-4">
+            <FilterSelect
+              param="status"
+              defaultValue="pending"
+              className="w-44"
+              options={[
+                { value: 'all', label: 'All Tasks' },
+                { value: 'pending', label: 'Pending' },
+                { value: 'in_progress', label: 'In Progress' },
+                { value: 'overdue', label: 'Overdue' },
+                { value: 'completed', label: 'Completed' },
+                { value: 'cancelled', label: 'Cancelled' },
+              ]}
+            />
+            {isAdmin && <ShowAllToggle />}
           </div>
+          <p className="text-sm text-gray-500">
+            Showing {filtered.length} of {tasks.length} tasks
+          </p>
         </CardContent>
       </Card>
 
-      {/* Tasks Table */}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Task Type</TableHead>
-            <TableHead>Plan / Vendor</TableHead>
-            {showAllUsers && <TableHead>Assigned To</TableHead>}
-            <TableHead>Due Date</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead align="right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {filteredTasks.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={showAllUsers ? 6 : 5} className="text-center text-gray-500">
-                No tasks found.
-              </TableCell>
-            </TableRow>
+      <Card>
+        <CardContent className="p-0">
+          {filtered.length === 0 ? (
+            <EmptyState
+              icon={ListTodo}
+              title="No tasks found"
+              description={
+                statusFilter === 'pending'
+                  ? 'You have no pending tasks. Try another filter to see past work.'
+                  : 'No tasks match this filter.'
+              }
+            />
           ) : (
-            filteredTasks.map((task) => {
-              const statusInfo = getStatusInfo(task);
-              return (
-                <TableRow key={task.id}>
-                  <TableCell>
-                    <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${getTaskTypeColor(task.task_type)}`}>
-                      {formatTaskType(task.task_type)}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <p className="font-medium">{task.visit?.routine?.plan_number}</p>
-                    <p className="text-sm text-gray-500">{task.visit?.routine?.vendor?.name}</p>
-                  </TableCell>
-                  {showAllUsers && (
-                    <TableCell>{task.assigned_to?.full_name}</TableCell>
-                  )}
-                  <TableCell>
-                    <p className={statusInfo.variant === 'overdue' ? 'text-red-600 font-medium' : ''}>
-                      {format(new Date(task.due_date), 'MMM d, yyyy')}
-                    </p>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
-                  </TableCell>
-                  <TableCell align="right">
-                    <div className="flex items-center justify-end space-x-2">
-                      <Link href={`/visits/${task.visit?.id}`}>
-                        <Button variant="ghost" size="sm" title="View Visit">
-                          <Eye className="w-4 h-4" />
-                        </Button>
-                      </Link>
-                      {(task.status === 'pending' || task.status === 'overdue') && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleStartTask(task.id)}
-                          title="Start Task"
-                        >
-                          <Clock className="w-4 h-4 text-blue-500" />
-                        </Button>
-                      )}
-                      {(task.status === 'pending' || task.status === 'in_progress' || task.status === 'overdue') && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleCompleteTask(task.id)}
-                          title="Complete Task"
-                        >
-                          <CheckCircle className="w-4 h-4 text-green-500" />
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
+            <Table className="border-0">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Task</TableHead>
+                  <TableHead>Plan / Vendor</TableHead>
+                  {showAll && <TableHead>Assigned To</TableHead>}
+                  <TableHead>Due Date</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead align="right">Actions</TableHead>
                 </TableRow>
-              );
-            })
+              </TableHeader>
+              <TableBody>
+                {filtered.map((task) => {
+                  const info = statusInfo(task);
+                  return (
+                    <TableRow key={task.id}>
+                      <TableCell>
+                        <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${TASK_TYPE_COLORS[task.task_type]}`}>
+                          {TASK_TYPE_LABELS[task.task_type]}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <p className="font-medium">{task.visit?.routine?.plan_number ?? '-'}</p>
+                        <p className="text-xs text-gray-500">{task.visit?.routine?.vendor?.name}</p>
+                      </TableCell>
+                      {showAll && <TableCell>{task.assigned_to?.full_name ?? '-'}</TableCell>}
+                      <TableCell className={info.variant === 'overdue' ? 'font-medium text-red-600' : ''}>
+                        {formatDate(task.due_date)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={info.variant}>{info.label}</Badge>
+                      </TableCell>
+                      <TableCell align="right">
+                        {task.visit && <TaskRowActions taskId={task.id} visitId={task.visit.id} status={task.status} />}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           )}
-        </TableBody>
-      </Table>
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -1,409 +1,153 @@
-'use client';
-
-import { useEffect, useState, useMemo } from 'react';
-import { Calendar as CalendarIcon, CheckSquare, AlertTriangle, FileText, ClipboardList, TrendingUp, ChevronRight, X } from 'lucide-react';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { addDays, addMonths, endOfMonth, format, startOfMonth, subMonths } from 'date-fns';
+import {
+  AlertTriangle,
+  Calendar as CalendarIcon,
+  CheckSquare,
+  ClipboardList,
+  FileText,
+  ListTodo,
+  TrendingUp,
+} from 'lucide-react';
+import { requireAuth } from '@/lib/auth';
+import {
+  formatDate,
+  isOverdue,
+  TASK_TYPE_LABELS,
+  TASK_STATUS_LABELS,
+  VISIT_STATUS_LABELS,
+  VISIT_STATUS_VARIANTS,
+  todayISO,
+} from '@/lib/labels';
+import PageHeader from '@/components/ui/PageHeader';
+import StatCard from '@/components/ui/StatCard';
 import Badge from '@/components/ui/Badge';
-import Button from '@/components/ui/Button';
-import Calendar, { CalendarEvent } from '@/components/ui/Calendar';
-import { format, isBefore, startOfMonth, endOfMonth, addMonths, subMonths, addDays } from 'date-fns';
+import EmptyState from '@/components/ui/EmptyState';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import CalendarSection, { type CalendarVisitEvent } from './CalendarSection';
+import type { TaskStatus, TaskType, VisitStatus } from '@/types/database';
 
-interface DashboardStats {
-  totalRoutines: number;
-  activeVisits: number;
-  pendingTasks: number;
-  overdueTasks: number;
-  openRecommendations: number;
-  completedThisMonth: number;
-}
-
-interface UpcomingVisit {
+interface VisitRow {
   id: string;
   scheduled_date: string;
-  status: string;
-  routine: {
-    plan_number: string;
-    description: string;
-    vendor: {
-      name: string;
-    };
-  };
+  status: VisitStatus;
+  routine: { plan_number: string; description: string; vendor: { name: string } | null } | null;
 }
 
-interface PendingTask {
+interface TaskRow {
   id: string;
-  task_type: string;
+  task_type: TaskType;
   due_date: string;
-  status: string;
+  status: TaskStatus;
   visit_id: string;
-  visit: {
-    routine: {
-      plan_number: string;
-      vendor: {
-        name: string;
-      };
-    };
-  };
+  visit: { routine: { plan_number: string; vendor: { name: string } | null } | null } | null;
 }
 
-interface CalendarVisit {
-  id: string;
-  scheduled_date: string;
-  status: string;
-  routine: {
-    plan_number: string;
-    description: string;
-    vendor: {
-      name: string;
-    };
-  };
-}
+export default async function DashboardPage() {
+  const { supabase, profile } = await requireAuth();
 
-export default function DashboardPage() {
-  const { userProfile, loading: authLoading } = useAuth();
-  const [stats, setStats] = useState<DashboardStats>({
-    totalRoutines: 0,
-    activeVisits: 0,
-    pendingTasks: 0,
-    overdueTasks: 0,
-    openRecommendations: 0,
-    completedThisMonth: 0,
-  });
-  const [upcomingVisits, setUpcomingVisits] = useState<UpcomingVisit[]>([]);
-  const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
-  const [calendarVisits, setCalendarVisits] = useState<CalendarVisit[]>([]);
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [selectedDateVisits, setSelectedDateVisits] = useState<CalendarEvent[]>([]);
-  const [dataLoading, setDataLoading] = useState(false);
-  const [dataLoaded, setDataLoaded] = useState(false);
-  const supabase = createClient();
+  const now = new Date();
+  const today = todayISO();
+  const monthStart = startOfMonth(now).toISOString();
+  const monthEnd = endOfMonth(now).toISOString();
+  const calendarStart = format(subMonths(startOfMonth(now), 1), 'yyyy-MM-dd');
+  const calendarEnd = format(addMonths(endOfMonth(now), 1), 'yyyy-MM-dd');
 
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      // Don't fetch if already loaded or currently loading
-      if (dataLoaded || dataLoading) return;
+  const [routinesRes, activeVisitsRes, myTasksRes, openRecsRes, completedRes, upcomingRes, pendingTasksRes, calendarRes] =
+    await Promise.all([
+      supabase.from('maintenance_routines').select('id', { count: 'exact', head: true }).eq('is_active', true),
+      supabase
+        .from('maintenance_visits')
+        .select('id', { count: 'exact', head: true })
+        .not('status', 'in', '(completed,cancelled)'),
+      supabase
+        .from('tasks')
+        .select('id, status, due_date')
+        .eq('assigned_to_id', profile.id)
+        .in('status', ['pending', 'in_progress', 'overdue']),
+      supabase.from('recommendations').select('id', { count: 'exact', head: true }).eq('status', 'open'),
+      supabase
+        .from('maintenance_visits')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'completed')
+        .gte('completed_at', monthStart)
+        .lte('completed_at', monthEnd),
+      supabase
+        .from('maintenance_visits')
+        .select('id, scheduled_date, status, routine:maintenance_routines(plan_number, description, vendor:vendors(name))')
+        .gte('scheduled_date', today)
+        .lte('scheduled_date', format(addDays(now, 30), 'yyyy-MM-dd'))
+        .not('status', 'in', '(completed,cancelled)')
+        .order('scheduled_date', { ascending: true })
+        .limit(5),
+      supabase
+        .from('tasks')
+        .select('id, task_type, due_date, status, visit_id, visit:maintenance_visits(routine:maintenance_routines(plan_number, vendor:vendors(name)))')
+        .eq('assigned_to_id', profile.id)
+        .in('status', ['pending', 'in_progress', 'overdue'])
+        .order('due_date', { ascending: true })
+        .limit(5),
+      supabase
+        .from('maintenance_visits')
+        .select('id, scheduled_date, status, routine:maintenance_routines(plan_number, description, vendor:vendors(name))')
+        .gte('scheduled_date', calendarStart)
+        .lte('scheduled_date', calendarEnd)
+        .order('scheduled_date', { ascending: true }),
+    ]);
 
-      // Wait for auth to finish loading
-      if (authLoading) return;
+  const myOpenTasks = myTasksRes.data ?? [];
+  const overdueCount = myOpenTasks.filter((t) => t.status === 'overdue' || isOverdue(t.due_date, t.status)).length;
 
-      // If no user profile, nothing to fetch
-      if (!userProfile) return;
-
-      setDataLoading(true);
-      try {
-        const today = new Date();
-        const monthStart = startOfMonth(today).toISOString();
-        const monthEnd = endOfMonth(today).toISOString();
-
-        // Fetch stats
-        const [routinesRes, visitsRes, tasksRes, recommendationsRes, completedRes] = await Promise.all([
-          supabase.from('maintenance_routines').select('id', { count: 'exact' }).eq('is_active', true),
-          supabase.from('maintenance_visits').select('id', { count: 'exact' }).not('status', 'in', '("completed","cancelled")'),
-          supabase.from('tasks').select('id, status, due_date').eq('assigned_to_id', userProfile.id).in('status', ['pending', 'in_progress', 'overdue']),
-          supabase.from('recommendations').select('id', { count: 'exact' }).eq('status', 'open'),
-          supabase
-            .from('maintenance_visits')
-            .select('id', { count: 'exact', head: true })
-            .eq('status', 'completed')
-            .gte('updated_at', monthStart)
-            .lte('updated_at', monthEnd),
-        ]);
-
-        const overdueTasks = tasksRes.data?.filter((t: { due_date: string; status: string }) =>
-          t.status === 'overdue' || (isBefore(new Date(t.due_date), today) && t.status !== 'completed')
-        ).length || 0;
-
-        setStats({
-          totalRoutines: routinesRes.count || 0,
-          activeVisits: visitsRes.count || 0,
-          pendingTasks: tasksRes.data?.length || 0,
-          overdueTasks,
-          openRecommendations: recommendationsRes.count || 0,
-          completedThisMonth: completedRes.count || 0,
-        });
-
-        // Fetch upcoming visits
-        const { data: visitsData } = await supabase
-          .from('maintenance_visits')
-          .select(`
-            id,
-            scheduled_date,
-            status,
-            routine:maintenance_routines(
-              plan_number,
-              description,
-              vendor:vendors(name)
-            )
-          `)
-          .gte('scheduled_date', today.toISOString().split('T')[0])
-          .lte('scheduled_date', addDays(today, 30).toISOString().split('T')[0])
-          .not('status', 'in', '("completed","cancelled")')
-          .order('scheduled_date', { ascending: true })
-          .limit(5);
-
-        setUpcomingVisits(visitsData as unknown as UpcomingVisit[] || []);
-
-        // Fetch pending tasks for user
-        const { data: tasksData } = await supabase
-          .from('tasks')
-          .select(`
-            id,
-            task_type,
-            due_date,
-            status,
-            visit_id,
-            visit:maintenance_visits(
-              routine:maintenance_routines(
-                plan_number,
-                vendor:vendors(name)
-              )
-            )
-          `)
-          .eq('assigned_to_id', userProfile.id)
-          .in('status', ['pending', 'in_progress', 'overdue'])
-          .order('due_date', { ascending: true })
-          .limit(5);
-
-        setPendingTasks(tasksData as unknown as PendingTask[] || []);
-
-        // Fetch visits for calendar (3 months: previous, current, next)
-        const calendarStart = subMonths(startOfMonth(new Date()), 1);
-        const calendarEnd = addMonths(endOfMonth(new Date()), 1);
-        const { data: calendarData } = await supabase
-          .from('maintenance_visits')
-          .select(`
-            id,
-            scheduled_date,
-            status,
-            routine:maintenance_routines(
-              plan_number,
-              description,
-              vendor:vendors(name)
-            )
-          `)
-          .gte('scheduled_date', calendarStart.toISOString().split('T')[0])
-          .lte('scheduled_date', calendarEnd.toISOString().split('T')[0])
-          .order('scheduled_date', { ascending: true });
-
-        setCalendarVisits(calendarData as unknown as CalendarVisit[] || []);
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error);
-      } finally {
-        setDataLoading(false);
-        setDataLoaded(true);
-      }
-    };
-
-    fetchDashboardData();
-  }, [userProfile, authLoading, dataLoading, dataLoaded]);
-
-  // Convert visits to calendar events
-  const calendarEvents: CalendarEvent[] = useMemo(() => {
-    return calendarVisits.map((visit) => ({
-      id: visit.id,
-      date: visit.scheduled_date,
-      title: visit.routine?.plan_number || 'Visit',
-      subtitle: visit.routine?.vendor?.name,
-      status: visit.status as CalendarEvent['status'],
-    }));
-  }, [calendarVisits]);
-
-  const handleDateClick = (date: Date, events: CalendarEvent[]) => {
-    setSelectedDate(date);
-    setSelectedDateVisits(events);
-  };
-
-  const handleCalendarEventClick = (event: CalendarEvent) => {
-    window.location.href = `/visits/${event.id}`;
-  };
-
-  const statCards = [
-    { title: 'Active Routines', value: stats.totalRoutines, icon: CalendarIcon, color: 'bg-blue-500', href: '/routines' },
-    { title: 'Active Visits', value: stats.activeVisits, icon: ClipboardList, color: 'bg-green-500', href: '/visits' },
-    { title: 'My Pending Tasks', value: stats.pendingTasks, icon: CheckSquare, color: 'bg-yellow-500', href: '/tasks' },
-    { title: 'Overdue Tasks', value: stats.overdueTasks, icon: AlertTriangle, color: 'bg-red-500', href: '/tasks' },
-    { title: 'Open Recommendations', value: stats.openRecommendations, icon: FileText, color: 'bg-purple-500', href: '/recommendations' },
-    { title: 'Completed This Month', value: stats.completedThisMonth, icon: TrendingUp, color: 'bg-teal-500', href: '/visits?status=completed' },
-  ];
-
-  const formatTaskType = (type: string) => {
-    const labels: Record<string, string> = {
-      confirm_visit_date: 'Confirm Visit Date',
-      upload_report: 'Upload Report',
-      create_recommendations: 'Create Recommendations',
-      review_recommendations: 'Review Recommendations',
-      technical_review: 'Technical Review',
-    };
-    return labels[type] || type;
-  };
-
-  const getStatusVariant = (status: string) => {
-    const variants: Record<string, 'pending' | 'in_progress' | 'completed' | 'cancelled'> = {
-      scheduled: 'pending',
-      date_confirmed: 'in_progress',
-      report_uploaded: 'in_progress',
-      recommendations_created: 'in_progress',
-      in_review: 'in_progress',
-      completed: 'completed',
-      cancelled: 'cancelled',
-    };
-    return variants[status] || 'pending';
-  };
-
-  // Only show loading spinner during initial auth check
-  if (authLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-      </div>
-    );
-  }
+  const upcomingVisits = (upcomingRes.data ?? []) as unknown as VisitRow[];
+  const pendingTasks = (pendingTasksRes.data ?? []) as unknown as TaskRow[];
+  const calendarEvents: CalendarVisitEvent[] = ((calendarRes.data ?? []) as unknown as VisitRow[]).map((v) => ({
+    id: v.id,
+    date: v.scheduled_date,
+    title: v.routine?.plan_number ?? 'Visit',
+    status: v.status,
+    vendorName: v.routine?.vendor?.name ?? '',
+    description: v.routine?.description ?? '',
+  }));
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-600">Welcome back, {userProfile?.full_name}</p>
+      <PageHeader title="Dashboard" description={`Welcome back, ${profile.full_name}`} />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <StatCard title="Active Routines" value={routinesRes.count ?? 0} icon={CalendarIcon} color="blue" href="/routines" />
+        <StatCard title="Active Visits" value={activeVisitsRes.count ?? 0} icon={ClipboardList} color="green" href="/visits" />
+        <StatCard title="My Pending Tasks" value={myOpenTasks.length} icon={CheckSquare} color="yellow" href="/tasks" />
+        <StatCard title="Overdue Tasks" value={overdueCount} icon={AlertTriangle} color="red" href="/tasks?status=overdue" />
+        <StatCard title="Open Recommendations" value={openRecsRes.count ?? 0} icon={FileText} color="purple" href="/recommendations" />
+        <StatCard title="Completed This Month" value={completedRes.count ?? 0} icon={TrendingUp} color="teal" href="/visits?status=completed" />
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {statCards.map((stat) => (
-          <Link key={stat.title} href={stat.href}>
-            <Card className="hover:shadow-md transition-shadow cursor-pointer">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <div className={`${stat.color} p-3 rounded-lg`}>
-                      <stat.icon className="w-6 h-6 text-white" />
-                    </div>
-                    <div className="ml-4">
-                      <p className="text-sm text-gray-500">{stat.title}</p>
-                      <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
-                    </div>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-gray-400" />
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-      </div>
+      <CalendarSection events={calendarEvents} />
 
-      {/* Calendar Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Visit Calendar</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Calendar
-              events={calendarEvents}
-              onDateClick={handleDateClick}
-              onEventClick={handleCalendarEventClick}
-              selectedDate={selectedDate}
-            />
-          </CardContent>
-        </Card>
-
-        {/* Selected Date Panel */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 sm:gap-6">
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>
-                {selectedDate
-                  ? format(selectedDate, 'EEEE, MMM d, yyyy')
-                  : 'Select a Date'}
-              </CardTitle>
-              {selectedDate && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setSelectedDate(null);
-                    setSelectedDateVisits([]);
-                  }}
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent>
-            {!selectedDate ? (
-              <p className="text-gray-500 text-sm">Click on a date in the calendar to see scheduled visits.</p>
-            ) : selectedDateVisits.length === 0 ? (
-              <p className="text-gray-500 text-sm">No visits scheduled for this date.</p>
-            ) : (
-              <div className="space-y-3">
-                {selectedDateVisits.map((event) => {
-                  const visit = calendarVisits.find((v) => v.id === event.id);
-                  return (
-                    <Link key={event.id} href={`/visits/${event.id}`}>
-                      <div className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer">
-                        <div className="flex items-start justify-between">
-                          <div className="min-w-0 flex-1">
-                            <p className="font-medium text-gray-900 truncate">
-                              {event.title}
-                            </p>
-                            <p className="text-sm text-gray-500 truncate">
-                              {visit?.routine?.vendor?.name}
-                            </p>
-                            <p className="text-xs text-gray-400 mt-1 line-clamp-2">
-                              {visit?.routine?.description}
-                            </p>
-                          </div>
-                          <Badge variant={getStatusVariant(event.status)} size="sm" className="flex-shrink-0 ml-2">
-                            {event.status.replace('_', ' ')}
-                          </Badge>
-                        </div>
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Upcoming Visits */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Upcoming Visits (Next 30 Days)</CardTitle>
+            <CardTitle className="text-base">Upcoming Visits (Next 30 Days)</CardTitle>
           </CardHeader>
           <CardContent>
             {upcomingVisits.length === 0 ? (
-              <p className="text-gray-500 text-sm">No upcoming visits scheduled.</p>
+              <EmptyState icon={CalendarIcon} title="No upcoming visits" description="Visits scheduled in the next 30 days will appear here." />
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-2">
                 {upcomingVisits.map((visit) => (
-                  <Link key={visit.id} href={`/visits/${visit.id}`}>
-                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer">
-                      <div>
-                        <p className="font-medium text-gray-900">
-                          {visit.routine?.plan_number}
-                        </p>
-                        <p className="text-sm text-gray-500">
-                          {visit.routine?.vendor?.name}
-                        </p>
-                      </div>
-                      <div className="flex items-center">
-                        <div className="text-right mr-2">
-                          <p className="text-sm font-medium text-gray-900">
-                            {format(new Date(visit.scheduled_date), 'MMM d, yyyy')}
-                          </p>
-                          <Badge variant={getStatusVariant(visit.status)} size="sm">
-                            {visit.status.replace('_', ' ')}
-                          </Badge>
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-gray-400" />
-                      </div>
+                  <Link
+                    key={visit.id}
+                    href={`/visits/${visit.id}`}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-gray-100 p-3 transition-colors hover:bg-gray-50"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900">{visit.routine?.plan_number}</p>
+                      <p className="truncate text-xs text-gray-500">{visit.routine?.vendor?.name}</p>
+                      <p className="text-xs text-gray-400">{formatDate(visit.scheduled_date)}</p>
                     </div>
+                    <Badge variant={VISIT_STATUS_VARIANTS[visit.status]} size="sm">
+                      {VISIT_STATUS_LABELS[visit.status]}
+                    </Badge>
                   </Link>
                 ))}
               </div>
@@ -411,41 +155,36 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* My Pending Tasks */}
         <Card>
           <CardHeader>
-            <CardTitle>My Pending Tasks</CardTitle>
+            <CardTitle className="text-base">My Pending Tasks</CardTitle>
           </CardHeader>
           <CardContent>
             {pendingTasks.length === 0 ? (
-              <p className="text-gray-500 text-sm">No pending tasks.</p>
+              <EmptyState icon={ListTodo} title="No pending tasks" description="You're all caught up." />
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-2">
                 {pendingTasks.map((task) => {
-                  const isOverdue = isBefore(new Date(task.due_date), new Date());
+                  const overdue = task.status === 'overdue' || isOverdue(task.due_date, task.status);
                   return (
-                    <Link key={task.id} href={`/visits/${task.visit_id}`}>
-                      <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer">
-                        <div>
-                          <p className="font-medium text-gray-900">
-                            {formatTaskType(task.task_type)}
-                          </p>
-                          <p className="text-sm text-gray-500">
-                            {task.visit?.routine?.plan_number} - {task.visit?.routine?.vendor?.name}
-                          </p>
-                        </div>
-                        <div className="flex items-center">
-                          <div className="text-right mr-2">
-                            <p className={`text-sm font-medium ${isOverdue ? 'text-red-600' : 'text-gray-900'}`}>
-                              {format(new Date(task.due_date), 'MMM d, yyyy')}
-                            </p>
-                            <Badge variant={isOverdue ? 'overdue' : 'pending'} size="sm">
-                              {isOverdue ? 'Overdue' : task.status.replace('_', ' ')}
-                            </Badge>
-                          </div>
-                          <ChevronRight className="w-4 h-4 text-gray-400" />
-                        </div>
+                    <Link
+                      key={task.id}
+                      href={`/visits/${task.visit_id}`}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-gray-100 p-3 transition-colors hover:bg-gray-50"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-900">{TASK_TYPE_LABELS[task.task_type]}</p>
+                        <p className="truncate text-xs text-gray-500">
+                          {task.visit?.routine?.plan_number}
+                          {task.visit?.routine?.vendor?.name ? ` — ${task.visit.routine.vendor.name}` : ''}
+                        </p>
+                        <p className={`text-xs ${overdue ? 'font-medium text-red-600' : 'text-gray-400'}`}>
+                          Due {formatDate(task.due_date)}
+                        </p>
                       </div>
+                      <Badge variant={overdue ? 'overdue' : 'pending'} size="sm">
+                        {overdue ? 'Overdue' : TASK_STATUS_LABELS[task.status]}
+                      </Badge>
                     </Link>
                   );
                 })}
