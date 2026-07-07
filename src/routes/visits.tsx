@@ -32,15 +32,26 @@ routes.get('/', async (c) => {
   const db = c.env.DB;
   const user = c.get('user');
   const statusFilter = c.req.query('status') ?? 'all';
+  const q = (c.req.query('q') ?? '').trim();
   const canManage = user.role === 'admin' || user.role === 'vendor_coordinator';
 
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (statusFilter !== 'all') {
+    where.push('v.status = ?');
+    params.push(statusFilter);
+  }
+  if (q) {
+    where.push('(r.plan_number LIKE ? OR ve.name LIKE ? OR r.description LIKE ? OR v.notification_number LIKE ?)');
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+  }
   const visits = await all<Visit & { plan_number: string; vendor_name: string }>(
     db,
     `SELECT v.*, r.plan_number, ve.name AS vendor_name
      FROM visits v JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = r.vendor_id
-     ${statusFilter !== 'all' ? 'WHERE v.status = ?' : ''}
+     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
      ORDER BY v.scheduled_date DESC`,
-    ...(statusFilter !== 'all' ? [statusFilter] : [])
+    ...params
   );
   const routines = canManage
     ? await all<Routine>(db, 'SELECT * FROM routines WHERE is_active = 1 ORDER BY plan_number')
@@ -54,16 +65,22 @@ routes.get('/', async (c) => {
 
       <Card pad={false}>
         <form class="filterbar" method="get" action="/visits">
+          <input name="q" value={q} placeholder="Search plan, vendor, notification #…" style="max-width:240px" aria-label="Search visits" />
           <select name="status" data-autosubmit aria-label="Filter by status">
             <option value="all">All statuses</option>
             {Object.entries(VISIT_STATUS_LABELS).map(([value, label]) => (
               <option value={value} selected={statusFilter === value}>{label}</option>
             ))}
           </select>
+          <button class="btn btn--sm" type="submit">Search</button>
+          {(q || statusFilter !== 'all') && <a class="btn btn--sm btn--ghost" href="/visits">Clear</a>}
           <span class="muted">{visits.length} visit{visits.length === 1 ? '' : 's'}</span>
         </form>
         {visits.length === 0 ? (
-          <EmptyState title="No visits found" hint={statusFilter !== 'all' ? 'Try clearing the status filter.' : 'Visits are generated automatically from active routines.'} />
+          <EmptyState
+            title="No visits found"
+            hint={q ? `Nothing matches "${q}"${statusFilter !== 'all' ? ' with that status' : ''}.` : statusFilter !== 'all' ? 'Try clearing the status filter.' : 'Visits are generated automatically from active routines.'}
+          />
         ) : (
           <div class="tbl-wrap">
             <table class="tbl">

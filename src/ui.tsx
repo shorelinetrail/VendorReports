@@ -284,6 +284,9 @@ export async function page(c: Context<App>, title: string, body: Child) {
             <header class="topbar">
               <label for="nav-toggle" class="topbar__menu" aria-label="Toggle navigation">☰</label>
               <h1 class="topbar__title">{title}</h1>
+              <form method="get" action="/visits" class="topbar__search">
+                <input name="q" type="search" placeholder="Search visits…" aria-label="Search visits" />
+              </form>
               <details class="dropdown">
                 <summary class="topbar__bell" aria-label={`Notifications (${notifications.length})`}>
                   <Icon name="bell" size={20} />

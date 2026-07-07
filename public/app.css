@@ -93,6 +93,12 @@ p { margin: 0.25rem 0; }
   background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 20;
 }
 .topbar__title { font-size: 1.05rem; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar__search { display: none; }
+@media (min-width: 720px) {
+  .topbar__search { display: block; }
+  .topbar__search input { width: 220px; padding: 0.35rem 0.65rem; font-size: 0.85rem; border-radius: 999px; background: var(--bg); border-color: transparent; }
+  .topbar__search input:focus { background: #fff; border-color: var(--primary); }
+}
 .topbar__bell { position: relative; cursor: pointer; color: var(--muted); display: flex; padding: 0.35rem; border-radius: 8px; list-style: none; }
 .topbar__bell:hover { background: var(--bg); }
 .topbar__bell::-webkit-details-marker { display: none; }
