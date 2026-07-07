@@ -221,8 +221,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary-sof
 .modal::backdrop { background: rgb(15 23 42 / 0.5); }
 .modal__head { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem 0; }
 .modal__head h2 { font-size: 1.05rem; }
-.modal form, .modal__content { padding: 1rem 1.25rem 1.25rem; }
-.modal__buttons { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
+.modal > form, .modal__content { padding: 1rem 1.25rem 1.25rem; }
+.modal__buttons { display: flex; justify-content: flex-end; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
 .modal .note { background: var(--primary-soft); border-radius: 8px; padding: 0.6rem 0.8rem; font-size: 0.83rem; margin-bottom: 0.85rem; }
 .modal .note--amber { background: var(--amber-soft); }
 .modal .context { background: var(--bg); border-radius: 8px; padding: 0.6rem 0.8rem; font-size: 0.85rem; margin-bottom: 0.85rem; }
