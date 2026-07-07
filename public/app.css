@@ -268,7 +268,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary-sof
 /* ---- Calendar ---- */
 .cal { width: 100%; }
 .cal__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; }
-.cal__grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+/* minmax(0,...) lets day cells shrink below content width so long vendor
+   names truncate with an ellipsis instead of stretching the column. */
+.cal__grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
 .cal__dow { text-align: center; font-size: 0.7rem; color: var(--muted); font-weight: 600; padding: 0.25rem 0; text-transform: uppercase; }
 .cal__day {
   min-height: 72px; border: 1px solid var(--border); border-radius: 8px; padding: 3px 4px;
@@ -279,7 +281,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary-sof
 .cal__day--today .cal__num { background: var(--primary); color: #fff; }
 .cal__day--selected { outline: 2px solid var(--primary); }
 .cal__num { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; }
-.cal__evt { border-radius: 4px; padding: 0 4px; font-size: 0.68rem; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.cal__evt { border-radius: 4px; padding: 0 4px; font-size: 0.68rem; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; min-width: 0; max-width: 100%; }
 .cal__evt:hover { text-decoration: none; opacity: 0.85; }
 .cal__more { font-size: 0.65rem; color: var(--muted); }
 .cal__legend { display: flex; gap: 1rem; margin-top: 0.6rem; font-size: 0.75rem; color: var(--muted); flex-wrap: wrap; }
