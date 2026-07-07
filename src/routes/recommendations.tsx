@@ -108,7 +108,7 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
                       <a class="rowlink" href={`/visits/${r.visit_id}`}>{r.plan_number}</a>
                       <div class="muted">{r.vendor_name}</div>
                     </td>
-                    <td>{r.sap_notification_number ?? '—'}</td>
+                    <td>{r.sap_notification_number ?? '-'}</td>
                     <td class={isOverdue(r) ? 'text-red' : ''}>{fmtDate(r.due_date)}</td>
                     <td>{recBadge(r.status)}</td>
                     <td>{r.created_by_name}</td>
@@ -142,7 +142,7 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
       {reviewable.map((rec) => (
         <Modal id={`review-${rec.id}`} title="Submit Technical Review">
           <form method="post" action={`/visits/${rec.visit_id}/recommendations/${rec.id}/review`}>
-            <div class="context"><strong>{rec.plan_number} — {rec.vendor_name}</strong><br />{rec.description}</div>
+            <div class="context"><strong>{rec.plan_number} - {rec.vendor_name}</strong><br />{rec.description}</div>
             <Field label="Decision">
               <select name="decision" required>
                 <option value="">Choose a decision…</option>
@@ -175,7 +175,7 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
       {visible.filter(canEdit).map((rec) => (
         <Modal id={`edit-${rec.id}`} title="Edit Recommendation">
           <form method="post" action={`/visits/${rec.visit_id}/recommendations/${rec.id}/edit`}>
-            <div class="context"><strong>{rec.plan_number} — {rec.vendor_name}</strong></div>
+            <div class="context"><strong>{rec.plan_number} - {rec.vendor_name}</strong></div>
             <Field label="Description">
               <textarea name="description" rows={4} required>{rec.description}</textarea>
             </Field>

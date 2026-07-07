@@ -304,7 +304,7 @@ export async function page(c: Context<App>, title: string, body: Child) {
                   <a href="/tasks" class="dropdown__all">View all tasks →</a>
                 </div>
               </details>
-              <span class="topbar__avatar" title={`${user.full_name} — ${ROLE_LABELS[user.role]}`}>
+              <span class="topbar__avatar" title={`${user.full_name} - ${ROLE_LABELS[user.role]}`}>
                 {user.full_name.charAt(0).toUpperCase()}
               </span>
             </header>

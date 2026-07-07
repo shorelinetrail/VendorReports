@@ -122,7 +122,7 @@ routes.get('/', async (c) => {
                   <a href={keepCal(day)} class={classes}>
                     <span class="cal__num">{parseInt(day.slice(8), 10)}</span>
                     {events.slice(0, 3).map((v) => (
-                      <span class={`cal__evt evt--${v.status}`} title={`${v.plan_number} — ${v.vendor_name} (${VISIT_STATUS_LABELS[v.status]})`}>
+                      <span class={`cal__evt evt--${v.status}`} title={`${v.plan_number} - ${v.vendor_name} (${VISIT_STATUS_LABELS[v.status]})`}>
                         {v.plan_number}
                       </span>
                     ))}
@@ -145,7 +145,7 @@ routes.get('/', async (c) => {
           {selected && selectedVisits.length === 0 && <p class="muted">No visits scheduled for this date.</p>}
           {selectedVisits.map((v) => (
             <a href={`/visits/${v.id}`} class="dropdown__item">
-              <strong>{v.plan_number} — {v.vendor_name}</strong>
+              <strong>{v.plan_number} - {v.vendor_name}</strong>
               <span>{v.description.slice(0, 90)}</span>
               {visitBadge(v.status)}
             </a>
@@ -185,7 +185,7 @@ routes.get('/', async (c) => {
                   <tr data-href={`/visits/${t.visit_id}`}>
                     <td>
                       <a class="rowlink" href={`/visits/${t.visit_id}`}>{TASK_TYPE_LABELS[t.task_type]}</a>
-                      <div class="muted">{t.plan_number} — {t.vendor_name}</div>
+                      <div class="muted">{t.plan_number} - {t.vendor_name}</div>
                     </td>
                     <td class={isTaskOverdue(t.status, t.due_date) ? 'text-red' : ''}>{fmtDate(t.due_date)}</td>
                     <td class="actions">{taskBadge(t.status, t.due_date)}</td>

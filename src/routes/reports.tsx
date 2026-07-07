@@ -1,4 +1,4 @@
-/** /reports — browse & download uploaded report files. /analytics — trends and stats. */
+/** /reports - browse & download uploaded report files. /analytics - trends and stats. */
 import { Hono } from 'hono';
 import { all } from '../db';
 import { fmtDate, fmtDateTime, fmtMonth, monthKey, monthStart, todayStr } from '../dates';

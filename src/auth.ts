@@ -112,7 +112,7 @@ export const requireAuth = createMiddleware<App>(async (c, next) => {
   }
 
   if (await needsSetup(c.env.DB)) return c.redirect('/setup');
-  if (c.req.method !== 'GET') return c.text('Session expired — reload and sign in again', 401);
+  if (c.req.method !== 'GET') return c.text('Session expired - reload and sign in again', 401);
   const dest = c.req.path === '/' ? '' : `?next=${encodeURIComponent(c.req.path)}`;
   return c.redirect(`/login${dest}`);
 });

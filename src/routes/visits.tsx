@@ -3,7 +3,7 @@
  * Status machine: scheduled → date_confirmed → report_uploaded →
  * recommendations_created → in_review → completed (reschedule resets to
  * scheduled; cancelled is terminal). Permissions come from visitPerms() and are
- * enforced here on every POST — the UI only decides what to show.
+ * enforced here on every POST - the UI only decides what to show.
  */
 import { Hono } from 'hono';
 import { all, first, insertRow, updateRow, deleteRow, now } from '../db';
@@ -79,7 +79,7 @@ routes.get('/', async (c) => {
                     <td>{v.vendor_name}</td>
                     <td>{fmtDate(v.scheduled_date)}</td>
                     <td>{fmtDate(v.confirmed_date)}</td>
-                    <td>{v.notification_number ?? '—'}</td>
+                    <td>{v.notification_number ?? '-'}</td>
                     <td>{visitBadge(v.status)}</td>
                     <td class="actions">
                       <a class="btn btn--sm" href={`/visits/${v.id}`}>Open</a>
@@ -106,7 +106,7 @@ routes.get('/', async (c) => {
             <Field label="Maintenance routine">
               <select name="routine_id" required>
                 <option value="">Select a routine…</option>
-                {routines.map((r) => <option value={r.id}>{r.plan_number} — {r.description.slice(0, 60)}</option>)}
+                {routines.map((r) => <option value={r.id}>{r.plan_number} - {r.description.slice(0, 60)}</option>)}
               </select>
             </Field>
             <Field label="Scheduled date">
@@ -391,7 +391,7 @@ routes.post('/:id/recommendations/:recId/review', async (c) => {
       completed_at: done ? now() : null,
     }, actor(c));
     // An assigned action means that person owes a response before the
-    // recommendation can be completed — give them a task with a deadline.
+    // recommendation can be completed - give them a task with a deadline.
     if (!done && assignTo) {
       const cfg = await getConfig(db);
       await createTask(db, b.visit.id, 'review_recommendations', assignTo,
@@ -400,14 +400,14 @@ routes.post('/:id/recommendations/:recId/review', async (c) => {
     }
     await completeOpenTasks(db, b.visit.id, 'technical_review', actor(c), c.get('user').id);
     // Once nothing is left awaiting review, the ball is back with the
-    // maintenance engineer — reflect that in the visit status/banner.
+    // maintenance engineer - reflect that in the visit status/banner.
     const stillInReview = await first(db, "SELECT id FROM recommendations WHERE visit_id = ? AND status = 'in_review'", b.visit.id);
     if (!stillInReview && b.visit.status === 'in_review') {
       await updateRow(db, 'visits', b.visit.id, { status: 'recommendations_created' satisfies VisitStatus }, actor(c));
     }
     const visit = (await first<Visit>(db, 'SELECT * FROM visits WHERE id = ?', b.visit.id))!;
     await maybeCreateCloseTask(db, visit, actor(c));
-    const message = `Review submitted — ${REVIEW_DECISION_LABELS[decision as keyof typeof REVIEW_DECISION_LABELS].toLowerCase()}.`;
+    const message = `Review submitted - ${REVIEW_DECISION_LABELS[decision as keyof typeof REVIEW_DECISION_LABELS].toLowerCase()}.`;
     // A no_action review can resolve the last recommendation too.
     const unresolved = await first(db, "SELECT id FROM recommendations WHERE visit_id = ? AND status NOT IN ('completed', 'cancelled')", b.visit.id);
     return unresolved ? message : { message, redirect: `/visits/${b.visit.id}?prompt-close=1` };
@@ -456,7 +456,7 @@ routes.post('/:id/recommendations/:recId/respond', async (c) => {
         action_response: response, action_responded_at: now(),
       }, actor(c));
       await completeOpenTasks(c.env.DB, b.visit.id, 'review_recommendations', actor(c), rec.action_assigned_to_id);
-      return 'Response recorded — the recommendation can now be completed.';
+      return 'Response recorded - the recommendation can now be completed.';
     }
   );
 });
@@ -524,7 +524,7 @@ routes.post('/:id/recommendations/:recId/complete', async (c) => {
     const unresolved = await first(db, "SELECT id FROM recommendations WHERE visit_id = ? AND status NOT IN ('completed', 'cancelled')", b.visit.id);
     return unresolved
       ? 'Recommendation completed.'
-      : { message: 'Recommendation completed — that was the last one.', redirect: `/visits/${b.visit.id}?prompt-close=1` };
+      : { message: 'Recommendation completed - that was the last one.', redirect: `/visits/${b.visit.id}?prompt-close=1` };
   });
 });
 
@@ -545,7 +545,7 @@ routes.post('/:id/recommendations/:recId/cancel', async (c) => {
     const unresolved = await first(db, "SELECT id FROM recommendations WHERE visit_id = ? AND status NOT IN ('completed', 'cancelled')", b.visit.id);
     return unresolved
       ? 'Recommendation cancelled.'
-      : { message: 'Recommendation cancelled — that was the last one.', redirect: `/visits/${b.visit.id}?prompt-close=1` };
+      : { message: 'Recommendation cancelled - that was the last one.', redirect: `/visits/${b.visit.id}?prompt-close=1` };
   });
 });
 
@@ -658,7 +658,7 @@ function reopenActivity(auditRows: AuditEvent[]): Activity[] {
       }
       if (row.table_name === 'recommendations' &&
           ['completed', 'cancelled'].includes(oldData.status) && ['open', 'approved'].includes(newData.status)) {
-        items.push({ date: row.created_at, event: 'Recommendation reopened', details: `${String(newData.description ?? '').slice(0, 60)}${by ? ` — reopened${by}` : ''}` });
+        items.push({ date: row.created_at, event: 'Recommendation reopened', details: `${String(newData.description ?? '').slice(0, 60)}${by ? ` - reopened${by}` : ''}` });
       }
     } catch { /* skip malformed rows */ }
   }
@@ -732,7 +732,7 @@ routes.get('/:id', async (c) => {
 
   return page(c, `Visit ${routine.plan_number}`, (
     <>
-      <PageHeader title={`${routine.plan_number} — ${routine.vendor_name}`} sub={routine.description}>
+      <PageHeader title={`${routine.plan_number} - ${routine.vendor_name}`} sub={routine.description}>
         <a class="btn" href="/visits">← All visits</a>
       </PageHeader>
 
@@ -750,7 +750,7 @@ routes.get('/:id', async (c) => {
           </div>
           {p.canClose ? (
             <div class="waiting waiting--ready">
-              All recommendations are resolved — this visit is ready to close.
+              All recommendations are resolved - this visit is ready to close.
               <ActionButton action={`/visits/${visit.id}/close`} label="Close Visit" class="btn btn--sm btn--green"
                 confirm="Close this visit? All recommendations are resolved." busy="Closing…" />
             </div>
@@ -760,7 +760,7 @@ routes.get('/:id', async (c) => {
         </Card>
       )}
 
-      {/* Workflow actions — only what the current user can actually do right now */}
+      {/* Workflow actions - only what the current user can actually do right now */}
       {(p.canConfirmDate || p.canUploadReport || p.canCreateRec || p.canReschedule || p.canClose || p.canReopen) && (
         <Card title="Actions">
           <div class="btn-row">
@@ -792,24 +792,24 @@ routes.get('/:id', async (c) => {
             <div>
               <dt>Notification #</dt>
               <dd>
-                {visit.notification_number ?? '—'}{' '}
+                {visit.notification_number ?? '-'}{' '}
                 {p.canReschedule && <button class="btn btn--ghost btn--sm" data-modal="edit-notification">Edit</button>}
               </dd>
             </div>
             {visit.rescheduled_at && (
-              <div><dt>Rescheduled</dt><dd class="muted">From {fmtDate(visit.rescheduled_from)} — {visit.reschedule_reason}</dd></div>
+              <div><dt>Rescheduled</dt><dd class="muted">From {fmtDate(visit.rescheduled_from)} - {visit.reschedule_reason}</dd></div>
             )}
           </dl>
 
           <h3 class="mt" style="font-size:0.9rem">Reports ({reports.length})</h3>
           {reports.length === 0 && !visit.no_report_reason && <p class="muted">No reports uploaded yet.</p>}
           {visit.no_report_reason && reports.length === 0 && (
-            <p class="waiting">No report available — {visit.no_report_reason}</p>
+            <p class="waiting">No report available - {visit.no_report_reason}</p>
           )}
           {reports.map((r) => (
             <div class="dropdown__item" style="border:1px solid var(--border); margin-top:0.4rem">
               <strong>{r.file_name}</strong>
-              <span class="muted">Uploaded by {r.uploaded_by_name} on {fmtDateTime(r.uploaded_at)}{r.notes ? ` — ${r.notes}` : ''}</span>
+              <span class="muted">Uploaded by {r.uploaded_by_name} on {fmtDateTime(r.uploaded_at)}{r.notes ? ` - ${r.notes}` : ''}</span>
               <span class="btn-row mt" style="margin-top:0.4rem">
                 <a class="btn btn--sm" href={`/visits/${visit.id}/reports/${r.id}/download`}><Icon name="download" size={14} /> Download</a>
                 {p.isAdmin && (
@@ -858,7 +858,7 @@ routes.get('/:id', async (c) => {
                         <div class="muted">
                           Decision: {REVIEW_DECISION_LABELS[rec.review_decision]}
                           {rec.action_assigned_name ? ` → ${rec.action_assigned_name}` : ''}
-                          {rec.review_action_description ? ` — ${rec.review_action_description}` : ''}
+                          {rec.review_action_description ? ` - ${rec.review_action_description}` : ''}
                         </div>
                       )}
                       {rec.technical_review_response && <div class="muted">“{rec.technical_review_response}”</div>}
@@ -866,7 +866,7 @@ routes.get('/:id', async (c) => {
                       {rec.action_response && <div class="muted">Response{rec.action_assigned_name ? ` from ${rec.action_assigned_name}` : ''}: {rec.action_response}</div>}
                       {rec.cancellation_reason && <div class="muted">Cancelled: {rec.cancellation_reason}</div>}
                     </td>
-                    <td>{rec.sap_notification_number ?? '—'}</td>
+                    <td>{rec.sap_notification_number ?? '-'}</td>
                     <td>{fmtDate(rec.due_date)}</td>
                     <td>{recBadge(rec.status)}</td>
                     <td>{rec.created_by_name}</td>
@@ -914,7 +914,7 @@ routes.get('/:id', async (c) => {
             {activity.map((a) => (
               <li>
                 <strong>{a.event}</strong>
-                <span class="muted">{fmtDateTime(a.date)}{a.details ? ` — ${a.details}` : ''}</span>
+                <span class="muted">{fmtDateTime(a.date)}{a.details ? ` - ${a.details}` : ''}</span>
               </li>
             ))}
           </ul>
@@ -925,7 +925,7 @@ routes.get('/:id', async (c) => {
       {p.canClose && c.req.query('prompt-close') === '1' && (
         <Modal id="prompt-close" title="Close this visit?" autoOpen>
           <div class="modal__content">
-            <p>All recommendations on this visit are resolved — it can be closed now.</p>
+            <p>All recommendations on this visit are resolved - it can be closed now.</p>
             <div class="modal__buttons">
               <button type="button" class="btn" data-close>Not yet</button>
               <ActionButton action={`/visits/${visit.id}/close`} label="Close Visit" class="btn btn--green" busy="Closing…" />
@@ -969,7 +969,7 @@ routes.get('/:id', async (c) => {
       <Modal id="add-rec" title="Add Recommendation">
         <form method="post" action={`/visits/${visit.id}/recommendations`}>
           {routine.requires_technical_review ? (
-            <div class="note">This routine requires technical review — the recommendation will be sent to {team.techEngineer?.full_name ?? 'the technical engineer'} automatically.</div>
+            <div class="note">This routine requires technical review - the recommendation will be sent to {team.techEngineer?.full_name ?? 'the technical engineer'} automatically.</div>
           ) : null}
           <Field label="Description">
             <textarea name="description" rows={4} required placeholder="Describe the recommendation…"></textarea>

@@ -78,7 +78,7 @@ export async function generateVisits(db: D1Database): Promise<{ created: string[
           maintenance_engineer_id: routine.maintenance_engineer_id,
           technical_engineer_id: routine.technical_engineer_id,
         }, null);
-        created.push(`${routine.plan_number} — ${date}`);
+        created.push(`${routine.plan_number} - ${date}`);
 
         const due = addDays(date, -cfg.visit_confirmation_days);
         if (due > today) {

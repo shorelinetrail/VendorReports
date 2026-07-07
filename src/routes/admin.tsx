@@ -26,7 +26,7 @@ routes.get('/users', admin, async (c) => {
 
   return page(c, 'Users', (
     <>
-      <PageHeader title="Users" sub="Accounts are created here — there is no self-signup">
+      <PageHeader title="Users" sub="Accounts are created here - there is no self-signup">
         <a class="btn" href="/users/import/template"><Icon name="download" size={16} /> CSV Template</a>
         <button class="btn" data-modal="import"><Icon name="upload" size={16} /> Bulk Import</button>
         <button class="btn btn--primary" data-modal="create"><Icon name="plus" size={16} /> Add User</button>
@@ -67,7 +67,7 @@ routes.get('/users', admin, async (c) => {
         <form method="post" action="/users">
           <Field label="Full name"><input name="full_name" required placeholder="Jane Doe" /></Field>
           <Field label="Email"><input type="email" name="email" required placeholder="jane@example.com" /></Field>
-          <Field label="Initial password" hint="At least 8 characters — share it with the user; they can't reset it themselves.">
+          <Field label="Initial password" hint="At least 8 characters - share it with the user; they can't reset it themselves.">
             <input name="password" required minlength={8} />
           </Field>
           <Field label="Role"><select name="role" required>{roleOptions()}</select></Field>
@@ -86,7 +86,7 @@ routes.get('/users', admin, async (c) => {
               <ModalButtons submit="Save Changes" />
             </form>
           </Modal>
-          <Modal id={`password-${u.id}`} title={`Reset password — ${u.full_name}`}>
+          <Modal id={`password-${u.id}`} title={`Reset password - ${u.full_name}`}>
             <form method="post" action={`/users/${u.id}/password`}>
               <Field label="New password" hint="At least 8 characters. Existing sessions stay signed in.">
                 <input name="password" required minlength={8} />
@@ -167,7 +167,7 @@ routes.post('/users/import', admin, async (c) => {
       errors.push(`Row ${i + 2}: ${err instanceof Error ? err.message : 'failed'}`);
     }
   }
-  flash(c, `Imported ${ok} of ${records.length} user(s).${errors.length ? ` Failures — ${errors.slice(0, 3).join('; ')}${errors.length > 3 ? ` (+${errors.length - 3} more)` : ''}` : ''}`,
+  flash(c, `Imported ${ok} of ${records.length} user(s).${errors.length ? ` Failures - ${errors.slice(0, 3).join('; ')}${errors.length > 3 ? ` (+${errors.length - 3} more)` : ''}` : ''}`,
     errors.length ? 'err' : 'ok');
   return c.redirect('/users');
 });
@@ -249,9 +249,9 @@ routes.get('/vendors', admin, async (c) => {
                 {vendors.map((v) => (
                   <tr data-row-modal={`edit-${v.id}`}>
                     <td><strong>{v.name}</strong></td>
-                    <td>{v.contact_email ?? '—'}</td>
-                    <td>{v.contact_phone ?? '—'}</td>
-                    <td><div class="desc-clip">{v.address ?? '—'}</div></td>
+                    <td>{v.contact_email ?? '-'}</td>
+                    <td>{v.contact_phone ?? '-'}</td>
+                    <td><div class="desc-clip">{v.address ?? '-'}</div></td>
                     <td>{v.is_active ? <Badge tone="green">Active</Badge> : <Badge tone="gray">Inactive</Badge>}</td>
                     <td class="actions">
                       <button class="btn btn--sm" data-modal={`edit-${v.id}`}>Edit</button>
@@ -380,12 +380,12 @@ routes.get('/settings', admin, async (c) => {
 
       <Card title="How the Workflow Runs">
         <ol style="margin:0; padding-left:1.25rem; display:grid; gap:0.4rem; font-size:0.9rem">
-          <li><strong>Visit scheduled</strong> — the daily job creates visits from active routines, {'{'}call horizon{'}'} months ahead.</li>
-          <li><strong>Date confirmation</strong> — the vendor coordinator confirms {cfg.visit_confirmation_days} days before the visit.</li>
-          <li><strong>Report upload</strong> — the report is due {cfg.report_upload_weeks} weeks after the visit.</li>
-          <li><strong>Recommendations</strong> — the maintenance engineer raises them within {cfg.recommendations_review_days} days.</li>
-          <li><strong>Technical review</strong> — reviewed within {cfg.technical_review_days} days (when the routine requires it).</li>
-          <li><strong>Completion</strong> — once every recommendation is resolved, the visit is closed.</li>
+          <li><strong>Visit scheduled</strong> - the daily job creates visits from active routines, {'{'}call horizon{'}'} months ahead.</li>
+          <li><strong>Date confirmation</strong> - the vendor coordinator confirms {cfg.visit_confirmation_days} days before the visit.</li>
+          <li><strong>Report upload</strong> - the report is due {cfg.report_upload_weeks} weeks after the visit.</li>
+          <li><strong>Recommendations</strong> - the maintenance engineer raises them within {cfg.recommendations_review_days} days.</li>
+          <li><strong>Technical review</strong> - reviewed within {cfg.technical_review_days} days (when the routine requires it).</li>
+          <li><strong>Completion</strong> - once every recommendation is resolved, the visit is closed.</li>
         </ol>
       </Card>
 
@@ -430,7 +430,7 @@ routes.post('/settings/generate-visits', admin, async (c) => {
   flash(
     c,
     result.created.length === 0
-      ? 'No new visits needed — everything within each routine\'s horizon already exists.'
+      ? 'No new visits needed - everything within each routine\'s horizon already exists.'
       : `Created ${result.created.length} visit(s): ${detail}`,
     result.errors.length ? 'err' : 'ok'
   );
@@ -493,7 +493,7 @@ routes.get('/audit', admin, async (c) => {
 
   return page(c, 'Audit Log', (
     <>
-      <PageHeader title="Audit Log" sub="Every change to core data, recorded automatically — append-only" />
+      <PageHeader title="Audit Log" sub="Every change to core data, recorded automatically - append-only" />
       <Card pad={false}>
         <form class="filterbar" method="get" action="/audit">
           <select name="table" data-autosubmit aria-label="Filter by table">

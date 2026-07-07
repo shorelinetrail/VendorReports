@@ -29,16 +29,16 @@ export function addDays(dateStr: string, days: number): string {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** 'Jul 7, 2026' — or a dash for null. */
+/** 'Jul 7, 2026' - or a dash for null. */
 export function fmtDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return '—';
+  if (!dateStr) return '-';
   const { y, m, d } = parse(dateStr);
   return `${MONTHS[m - 1]} ${d}, ${y}`;
 }
 
 /** 'Jul 7, 2026, 14:05 UTC' from an ISO timestamp. */
 export function fmtDateTime(iso: string | null | undefined): string {
-  if (!iso) return '—';
+  if (!iso) return '-';
   const t = iso.slice(11, 16);
   return t ? `${fmtDate(iso)}, ${t} UTC` : fmtDate(iso);
 }
