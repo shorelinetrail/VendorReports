@@ -38,7 +38,7 @@ routes.get('/users', admin, async (c) => {
             <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th class="actions">Actions</th></tr></thead>
             <tbody>
               {users.map((u) => (
-                <tr>
+                <tr data-row-modal={`edit-${u.id}`}>
                   <td><strong>{u.full_name}</strong>{u.id === me.id && <span class="muted"> (you)</span>}</td>
                   <td>{u.email}</td>
                   <td><Badge tone={ROLE_TONES[u.role]}>{ROLE_LABELS[u.role]}</Badge></td>
@@ -247,7 +247,7 @@ routes.get('/vendors', admin, async (c) => {
               <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th>Status</th><th class="actions">Actions</th></tr></thead>
               <tbody>
                 {vendors.map((v) => (
-                  <tr>
+                  <tr data-row-modal={`edit-${v.id}`}>
                     <td><strong>{v.name}</strong></td>
                     <td>{v.contact_email ?? '—'}</td>
                     <td>{v.contact_phone ?? '—'}</td>

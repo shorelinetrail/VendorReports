@@ -118,7 +118,7 @@ routes.get('/', async (c) => {
                 {routinesList.map((r) => {
                   const due = nextDue(r);
                   return (
-                    <tr>
+                    <tr {...(canManage ? { 'data-row-modal': `edit-${r.id}` } : {})}>
                       <td><strong>{r.plan_number}</strong></td>
                       <td><div class="desc-clip">{r.description}</div></td>
                       <td>{r.vendor_name}</td>

@@ -96,7 +96,7 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
               </thead>
               <tbody>
                 {visible.map((r) => (
-                  <tr>
+                  <tr data-href={`/visits/${r.visit_id}`}>
                     <td>
                       <div class="desc-clip">{r.description}</div>
                       {r.review_decision && <div class="muted">Decision: {REVIEW_DECISION_LABELS[r.review_decision]}</div>}

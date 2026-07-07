@@ -74,7 +74,7 @@ routes.get('/', async (c) => {
               </thead>
               <tbody>
                 {visits.map((v) => (
-                  <tr>
+                  <tr data-href={`/visits/${v.id}`}>
                     <td><a class="rowlink" href={`/visits/${v.id}`}>{v.plan_number}</a></td>
                     <td>{v.vendor_name}</td>
                     <td>{fmtDate(v.scheduled_date)}</td>

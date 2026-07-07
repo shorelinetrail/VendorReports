@@ -193,6 +193,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 .tbl td { padding: 0.65rem 1.1rem; border-bottom: 1px solid var(--border); vertical-align: top; }
 .tbl tbody tr:last-child td { border-bottom: 0; }
 .tbl tbody tr:hover { background: #f8fafc; }
+.tbl tbody tr[data-href], .tbl tbody tr[data-row-modal] { cursor: pointer; }
 .tbl .num, .tbl th.num { text-align: right; }
 .tbl .actions { text-align: right; white-space: nowrap; }
 .tbl .actions form { display: inline; }

@@ -98,7 +98,7 @@ routes.get('/reports', async (c) => {
               </thead>
               <tbody>
                 {reports.map((r) => (
-                  <tr>
+                  <tr data-href={`/visits/${r.visit_id}`}>
                     <td><a class="rowlink" href={`/visits/${r.visit_id}`}>{r.plan_number}</a></td>
                     <td><div class="desc-clip">{r.file_name}</div></td>
                     <td>{r.vendor_name}</td>

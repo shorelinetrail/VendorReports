@@ -93,7 +93,7 @@ routes.get('/', async (c) => {
                   const mine = t.assigned_to_id === user.id || user.role === 'admin';
                   const open = ['pending', 'in_progress', 'overdue'].includes(t.status);
                   return (
-                    <tr>
+                    <tr data-href={`/visits/${t.visit_id}`}>
                       <td>
                         <strong>{TASK_TYPE_LABELS[t.task_type]}</strong>
                         {t.notes && <div class="muted desc-clip">{t.notes}</div>}

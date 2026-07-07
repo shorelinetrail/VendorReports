@@ -3,6 +3,18 @@
 // plain HTML form; this file only smooths the experience.
 
 document.addEventListener('click', (e) => {
+  // Clicking anywhere on a table row opens its item (link or edit modal),
+  // unless the click was on an interactive element inside the row.
+  const row = e.target.closest('tr[data-href], tr[data-row-modal]');
+  if (row && !e.target.closest('a, button, input, select, textarea, label, form')) {
+    if (row.dataset.href) {
+      window.location.href = row.dataset.href;
+      return;
+    }
+    document.getElementById(row.dataset.rowModal)?.showModal();
+    return;
+  }
+
   const opener = e.target.closest('[data-modal]');
   if (opener) {
     e.preventDefault();

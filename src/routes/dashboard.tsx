@@ -161,7 +161,7 @@ routes.get('/', async (c) => {
             <table class="tbl">
               <tbody>
                 {upcoming.map((v) => (
-                  <tr>
+                  <tr data-href={`/visits/${v.id}`}>
                     <td>
                       <a class="rowlink" href={`/visits/${v.id}`}>{v.plan_number}</a>
                       <div class="muted">{v.vendor_name}</div>
@@ -182,7 +182,7 @@ routes.get('/', async (c) => {
             <table class="tbl">
               <tbody>
                 {myTasks.slice(0, 5).map((t) => (
-                  <tr>
+                  <tr data-href={`/visits/${t.visit_id}`}>
                     <td>
                       <a class="rowlink" href={`/visits/${t.visit_id}`}>{TASK_TYPE_LABELS[t.task_type]}</a>
                       <div class="muted">{t.plan_number} — {t.vendor_name}</div>
