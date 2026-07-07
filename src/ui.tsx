@@ -116,7 +116,7 @@ export const isTaskOverdue = (status: TaskStatus, dueDate: string) =>
 
 // ---- Building blocks ----
 
-export const PageHeader: FC<{ title: string; sub?: string; children?: Child }> = ({ title, sub, children }) => (
+export const PageHeader: FC<{ title: Child; sub?: string; children?: Child }> = ({ title, sub, children }) => (
   <div class="page-head">
     <div>
       <h1>{title}</h1>
@@ -303,6 +303,9 @@ export async function page(c: Context<App>, title: string, body: Child) {
                 <strong>{user.full_name}</strong>
                 <span>{ROLE_LABELS[user.role]}{user.role !== 'admin' && isAdmin(user) ? ' · Admin' : ''}</span>
               </div>
+              <button type="button" class="nav-item nav-item--button" data-modal="change-password">
+                <Icon name="key" /> Change password
+              </button>
               <form method="post" action="/logout">
                 <button type="submit" class="nav-item nav-item--button"><Icon name="logout" /> Sign out</button>
               </form>
@@ -370,6 +373,17 @@ export async function page(c: Context<App>, title: string, body: Child) {
           </div>
         </div>
         <label for="nav-toggle" class="nav-backdrop" aria-hidden="true"></label>
+        <Modal id="change-password" title="Change Password">
+          <form method="post" action="/account/password">
+            <Field label="Current password">
+              <input type="password" name="current_password" required autocomplete="current-password" />
+            </Field>
+            <Field label="New password" hint="At least 8 characters.">
+              <input type="password" name="new_password" required minlength={8} autocomplete="new-password" />
+            </Field>
+            <ModalButtons submit="Change Password" />
+          </form>
+        </Modal>
         {flash && <div class={`toast toast--${flash.kind}`} role="status">{flash.message}</div>}
         <script src="/app.js" defer></script>
       </body>

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { requireAuth, requireRole, setImpersonation, flash } from './auth';
-import { first } from './db';
+import { requireAuth, requireRole, setImpersonation, flash, hashPassword, verifyPassword } from './auth';
+import { first, updateRow } from './db';
 import { generateVisits, expireTasks } from './workflow';
 import type { App, Env, User } from './types';
 
@@ -19,6 +19,25 @@ app.route('/', authRoutes);
 
 // Everything below requires a signed-in session.
 app.use('*', requireAuth);
+
+// Users change their own password (the REAL account, never an impersonated one).
+app.post('/account/password', async (c) => {
+  const me = c.get('realUser');
+  const form = await c.req.formData();
+  const current = String(form.get('current_password') ?? '');
+  const next = String(form.get('new_password') ?? '');
+  const back = c.req.header('referer') ?? '/';
+  if (!(await verifyPassword(current, me.password_hash))) {
+    flash(c, 'Your current password is incorrect.', 'err');
+  } else if (next.length < 8) {
+    flash(c, 'New password needs at least 8 characters.', 'err');
+  } else {
+    await updateRow(c.env.DB, 'users', me.id, { password_hash: await hashPassword(next) }, me.id);
+    flash(c, 'Password changed.');
+  }
+  const url = new URL(back, c.req.url);
+  return c.redirect(url.origin === new URL(c.req.url).origin ? url.pathname + url.search : '/');
+});
 
 app.post('/impersonate', requireRole('admin'), async (c) => {
   const form = await c.req.formData();
