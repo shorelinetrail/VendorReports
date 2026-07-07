@@ -386,6 +386,12 @@ routes.post('/:id/recommendations/:recId/review', async (c) => {
       completed_at: done ? now() : null,
     }, actor(c));
     await completeOpenTasks(db, b.visit.id, 'technical_review', actor(c), c.get('user').id);
+    // Once nothing is left awaiting review, the ball is back with the
+    // maintenance engineer — reflect that in the visit status/banner.
+    const stillInReview = await first(db, "SELECT id FROM recommendations WHERE visit_id = ? AND status = 'in_review'", b.visit.id);
+    if (!stillInReview && b.visit.status === 'in_review') {
+      await updateRow(db, 'visits', b.visit.id, { status: 'recommendations_created' satisfies VisitStatus }, actor(c));
+    }
     const visit = (await first<Visit>(db, 'SELECT * FROM visits WHERE id = ?', b.visit.id))!;
     await maybeCreateCloseTask(db, visit, actor(c));
     return `Review submitted — ${REVIEW_DECISION_LABELS[decision as keyof typeof REVIEW_DECISION_LABELS].toLowerCase()}.`;
