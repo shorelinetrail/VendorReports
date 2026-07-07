@@ -3,6 +3,13 @@
 // plain HTML form; this file only smooths the experience.
 
 document.addEventListener('click', (e) => {
+  // Clamped long text expands/collapses on click (takes priority over row nav).
+  const clip = e.target.closest('.desc-clip--more');
+  if (clip) {
+    clip.classList.toggle('desc-clip--open');
+    return;
+  }
+
   // Clicking anywhere on a table row opens its item (link or edit modal),
   // unless the click was on an interactive element inside the row.
   const row = e.target.closest('tr[data-href], tr[data-row-modal]');
@@ -81,6 +88,14 @@ document.querySelectorAll('[data-show-when]').forEach((el) => {
   const show = ctrl && values.split('|').includes(ctrl.value);
   el.hidden = !show;
   el.querySelectorAll('input, select, textarea').forEach((c) => (c.disabled = !show));
+});
+
+// Mark clamped text that is actually overflowing so it can be click-expanded.
+document.querySelectorAll('.desc-clip').forEach((el) => {
+  if (el.scrollHeight > el.clientHeight + 2) {
+    el.classList.add('desc-clip--more');
+    el.title = 'Click to show the full text';
+  }
 });
 
 // Dialogs marked for auto-open (e.g. the "ready to close the visit?" prompt).
