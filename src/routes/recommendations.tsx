@@ -8,7 +8,10 @@ import { REVIEW_DECISION_LABELS, ROLE_LABELS, type App, type Recommendation } fr
 
 const routes = new Hono<App>();
 
-type RecRow = Recommendation & { plan_number: string; vendor_name: string; created_by_name: string; reviewed_by_name: string | null };
+type RecRow = Recommendation & {
+  plan_number: string; vendor_name: string; created_by_name: string; reviewed_by_name: string | null;
+  maintenance_engineer_id: string;
+};
 
 const FILTERS = [
   { value: 'active', label: 'All active' },
@@ -27,7 +30,8 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
 
   const recs = await all<RecRow>(
     c.env.DB,
-    `SELECT rec.*, r.plan_number, ve.name AS vendor_name, cb.full_name AS created_by_name, rb.full_name AS reviewed_by_name
+    `SELECT rec.*, r.plan_number, ve.name AS vendor_name, cb.full_name AS created_by_name, rb.full_name AS reviewed_by_name,
+            v.maintenance_engineer_id
      FROM recommendations rec
      JOIN visits v ON v.id = rec.visit_id
      JOIN routines r ON r.id = v.routine_id
@@ -52,6 +56,10 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
   const canReview = user.role === 'admin' || user.role === 'technical_engineer';
   const reviewable = visible.filter((r) => r.status === 'in_review' && canReview);
   const users = reviewable.length > 0 ? await activeUsers(c.env.DB) : [];
+  // Complete/cancel belong to the visit's maintenance engineer (or an admin);
+  // reviewing is the technical engineer's only recommendation action.
+  const canAct = (r: RecRow) => user.role === 'admin' || user.id === r.maintenance_engineer_id;
+  const sapMissing = (r: RecRow) => r.review_decision === 'request_sap' && !r.sap_notification_number;
 
   return page(c, 'Recommendations', (
     <>
@@ -100,9 +108,11 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
                       {r.status === 'in_review' && canReview && (
                         <button class="btn btn--sm btn--primary" data-modal={`review-${r.id}`}>Review</button>
                       )}
-                      {['open', 'approved'].includes(r.status) && (
+                      {['open', 'approved'].includes(r.status) && canAct(r) && (
                         <>
-                          <ActionButton action={`/visits/${r.visit_id}/recommendations/${r.id}/complete`} label="Complete" class="btn btn--sm btn--green" />
+                          {sapMissing(r)
+                            ? <a class="btn btn--sm btn--primary" href={`/visits/${r.visit_id}`}>Add SAP Details</a>
+                            : <ActionButton action={`/visits/${r.visit_id}/recommendations/${r.id}/complete`} label="Complete" class="btn btn--sm btn--green" />}
                           <button class="btn btn--sm btn--danger" data-modal={`cancel-${r.id}`}>Cancel</button>
                         </>
                       )}
@@ -148,7 +158,7 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
         </Modal>
       ))}
 
-      {visible.filter((r) => ['open', 'approved'].includes(r.status)).map((rec) => (
+      {visible.filter((r) => ['open', 'approved'].includes(r.status) && canAct(r)).map((rec) => (
         <Modal id={`cancel-${rec.id}`} title="Cancel Recommendation">
           <form method="post" action={`/visits/${rec.visit_id}/recommendations/${rec.id}/cancel`}>
             <div class="context">{rec.description}</div>

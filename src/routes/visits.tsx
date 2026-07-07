@@ -419,7 +419,10 @@ routes.post('/:id/recommendations/:recId/sap', async (c) => {
 });
 
 routes.post('/:id/recommendations/:recId/complete', async (c) => {
-  return withVisit(c, () => true, async (b) => {
+  return withVisit(c, (b) => {
+    const p = perms(c, b);
+    return p.isMaintEngineer || p.isAdmin;
+  }, async (b) => {
     const rec = b.recs.find((r) => r.id === c.req.param('recId'));
     if (!rec || !['open', 'approved'].includes(rec.status)) throw new Error('Only open or approved recommendations can be completed.');
     if (rec.review_decision === 'request_sap' && !rec.sap_notification_number) {
@@ -436,7 +439,10 @@ routes.post('/:id/recommendations/:recId/complete', async (c) => {
 routes.post('/:id/recommendations/:recId/cancel', async (c) => {
   const form = await c.req.formData();
   const reason = String(form.get('reason') ?? '').trim();
-  return withVisit(c, () => true, async (b) => {
+  return withVisit(c, (b) => {
+    const p = perms(c, b);
+    return p.isMaintEngineer || p.isAdmin;
+  }, async (b) => {
     const rec = b.recs.find((r) => r.id === c.req.param('recId'));
     if (!rec || !['open', 'approved'].includes(rec.status)) throw new Error('Only open or approved recommendations can be cancelled.');
     if (!reason) throw new Error('A cancellation reason is required.');
@@ -730,11 +736,14 @@ routes.get('/:id', async (c) => {
                         <button class="btn btn--sm btn--primary" data-modal={`review-${rec.id}`}>Submit Review</button>
                       )}
                       {rec.status === 'approved' && rec.review_decision === 'request_sap' && !rec.sap_notification_number && canManageRec && (
-                        <button class="btn btn--sm" data-modal={`sap-${rec.id}`}>Add SAP Details</button>
+                        <button class="btn btn--sm btn--primary" data-modal={`sap-${rec.id}`}>Add SAP Details</button>
                       )}
-                      {['open', 'approved'].includes(rec.status) && (
+                      {['open', 'approved'].includes(rec.status) && canManageRec && (
                         <>
-                          <ActionButton action={`/visits/${visit.id}/recommendations/${rec.id}/complete`} label="Complete" class="btn btn--sm btn--green" />
+                          {/* Complete is impossible until SAP details exist, so don't offer it */}
+                          {!(rec.review_decision === 'request_sap' && !rec.sap_notification_number) && (
+                            <ActionButton action={`/visits/${visit.id}/recommendations/${rec.id}/complete`} label="Complete" class="btn btn--sm btn--green" />
+                          )}
                           <button class="btn btn--sm btn--danger" data-modal={`cancel-rec-${rec.id}`}>Cancel</button>
                         </>
                       )}
@@ -900,7 +909,7 @@ routes.get('/:id', async (c) => {
         </Modal>
       ))}
 
-      {recs.filter((r) => ['open', 'approved'].includes(r.status)).map((rec) => (
+      {canManageRec && recs.filter((r) => ['open', 'approved'].includes(r.status)).map((rec) => (
         <Modal id={`cancel-rec-${rec.id}`} title="Cancel Recommendation">
           <form method="post" action={`/visits/${visit.id}/recommendations/${rec.id}/cancel`}>
             <div class="context">{rec.description}</div>
