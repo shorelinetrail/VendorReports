@@ -398,6 +398,30 @@ routes.post('/:id/recommendations/:recId/review', async (c) => {
   });
 });
 
+routes.post('/:id/recommendations/:recId/edit', async (c) => {
+  const form = await c.req.formData();
+  const description = String(form.get('description') ?? '').trim();
+  const sap = String(form.get('sap_notification_number') ?? '').trim();
+  const dueDate = String(form.get('due_date') ?? '').trim();
+  return withVisit(
+    c,
+    (b) => {
+      const p = perms(c, b);
+      return p.isMaintEngineer || p.isTechEngineer || p.isAdmin;
+    },
+    async (b) => {
+      const rec = b.recs.find((r) => r.id === c.req.param('recId'));
+      if (!rec || ['completed', 'cancelled'].includes(rec.status)) throw new Error('Completed or cancelled recommendations cannot be edited.');
+      if (!description) throw new Error('A description is required.');
+      if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) throw new Error('Pick a valid due date.');
+      await updateRow(c.env.DB, 'recommendations', rec.id, {
+        description, sap_notification_number: sap || null, due_date: dueDate || null,
+      }, actor(c));
+      return 'Recommendation updated.';
+    }
+  );
+});
+
 routes.post('/:id/recommendations/:recId/sap', async (c) => {
   const form = await c.req.formData();
   const sap = String(form.get('sap_notification_number') ?? '').trim();
@@ -597,6 +621,7 @@ routes.get('/:id', async (c) => {
   });
   const activity = buildActivity(bundle);
   const canManageRec = p.isMaintEngineer || p.isAdmin;
+  const canEditRec = p.isMaintEngineer || p.isTechEngineer || p.isAdmin;
 
   return page(c, `Visit ${routine.plan_number}`, (
     <>
@@ -729,6 +754,9 @@ routes.get('/:id', async (c) => {
                     <td>{recBadge(rec.status)}</td>
                     <td>{rec.created_by_name}</td>
                     <td class="actions">
+                      {!['completed', 'cancelled'].includes(rec.status) && canEditRec && (
+                        <button class="btn btn--sm" data-modal={`edit-rec-${rec.id}`}>Edit</button>
+                      )}
                       {rec.status === 'open' && !rec.sent_for_review && canManageRec && routine.requires_technical_review && (
                         <ActionButton action={`/visits/${visit.id}/recommendations/${rec.id}/send-review`} label="Send for Review" class="btn btn--sm" />
                       )}
@@ -905,6 +933,21 @@ routes.get('/:id', async (c) => {
               <Field label="Due date"><input type="date" name="due_date" required /></Field>
             </div>
             <ModalButtons submit="Save SAP Details" />
+          </form>
+        </Modal>
+      ))}
+
+      {canEditRec && recs.filter((r) => !['completed', 'cancelled'].includes(r.status)).map((rec) => (
+        <Modal id={`edit-rec-${rec.id}`} title="Edit Recommendation">
+          <form method="post" action={`/visits/${visit.id}/recommendations/${rec.id}/edit`}>
+            <Field label="Description">
+              <textarea name="description" rows={4} required>{rec.description}</textarea>
+            </Field>
+            <div class="form-grid">
+              <Field label="SAP notification # (optional)"><input name="sap_notification_number" value={rec.sap_notification_number ?? ''} /></Field>
+              <Field label="Due date (optional)"><input type="date" name="due_date" value={rec.due_date ?? ''} /></Field>
+            </div>
+            <ModalButtons submit="Save Changes" />
           </form>
         </Modal>
       ))}

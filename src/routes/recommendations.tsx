@@ -10,7 +10,7 @@ const routes = new Hono<App>();
 
 type RecRow = Recommendation & {
   plan_number: string; vendor_name: string; created_by_name: string; reviewed_by_name: string | null;
-  maintenance_engineer_id: string;
+  maintenance_engineer_id: string; technical_engineer_id: string;
 };
 
 const FILTERS = [
@@ -31,7 +31,7 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
   const recs = await all<RecRow>(
     c.env.DB,
     `SELECT rec.*, r.plan_number, ve.name AS vendor_name, cb.full_name AS created_by_name, rb.full_name AS reviewed_by_name,
-            v.maintenance_engineer_id
+            v.maintenance_engineer_id, v.technical_engineer_id
      FROM recommendations rec
      JOIN visits v ON v.id = rec.visit_id
      JOIN routines r ON r.id = v.routine_id
@@ -59,6 +59,9 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
   // Complete/cancel belong to the visit's maintenance engineer (or an admin);
   // reviewing is the technical engineer's only recommendation action.
   const canAct = (r: RecRow) => user.role === 'admin' || user.id === r.maintenance_engineer_id;
+  const canEdit = (r: RecRow) =>
+    !['completed', 'cancelled'].includes(r.status) &&
+    (user.role === 'admin' || user.id === r.maintenance_engineer_id || user.id === r.technical_engineer_id);
   const sapMissing = (r: RecRow) => r.review_decision === 'request_sap' && !r.sap_notification_number;
 
   return page(c, 'Recommendations', (
@@ -105,6 +108,7 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
                     <td>{r.created_by_name}</td>
                     <td class="actions">
                       <a class="btn btn--sm" href={`/visits/${r.visit_id}`}>Open Visit</a>
+                      {canEdit(r) && <button class="btn btn--sm" data-modal={`edit-${r.id}`}>Edit</button>}
                       {r.status === 'in_review' && canReview && (
                         <button class="btn btn--sm btn--primary" data-modal={`review-${r.id}`}>Review</button>
                       )}
@@ -154,6 +158,22 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
               <textarea name="response" rows={3} placeholder="Review response…"></textarea>
             </Field>
             <ModalButtons submit="Submit Review" />
+          </form>
+        </Modal>
+      ))}
+
+      {visible.filter(canEdit).map((rec) => (
+        <Modal id={`edit-${rec.id}`} title="Edit Recommendation">
+          <form method="post" action={`/visits/${rec.visit_id}/recommendations/${rec.id}/edit`}>
+            <div class="context"><strong>{rec.plan_number} — {rec.vendor_name}</strong></div>
+            <Field label="Description">
+              <textarea name="description" rows={4} required>{rec.description}</textarea>
+            </Field>
+            <div class="form-grid">
+              <Field label="SAP notification # (optional)"><input name="sap_notification_number" value={rec.sap_notification_number ?? ''} /></Field>
+              <Field label="Due date (optional)"><input type="date" name="due_date" value={rec.due_date ?? ''} /></Field>
+            </div>
+            <ModalButtons submit="Save Changes" />
           </form>
         </Modal>
       ))}
