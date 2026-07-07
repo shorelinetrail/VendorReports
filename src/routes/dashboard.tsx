@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import { all, first } from '../db';
-import { addDays, fmtDate, fmtMonth, monthStart, todayStr } from '../dates';
+import { addDays, fmtDate, monthStart, todayStr } from '../dates';
 import { page, StatCard, Card, EmptyState, taskBadge, visitBadge, isTaskOverdue } from '../ui';
 import { TASK_TYPE_LABELS, VISIT_STATUS_LABELS } from '../types';
 import type { App, TaskStatus, TaskType, VisitStatus } from '../types';
@@ -28,7 +28,10 @@ routes.get('/', async (c) => {
   const db = c.env.DB;
   const user = c.get('user');
   const today = todayStr();
-  const month = /^\d{4}-\d{2}$/.test(c.req.query('cal') ?? '') ? c.req.query('cal')! : today.slice(0, 7);
+  // Month via ?cal=YYYY-MM (nav arrows) or the ?cal_y/?cal_m selector dropdowns.
+  const calQuery = c.req.query('cal')
+    ?? (c.req.query('cal_y') && c.req.query('cal_m') ? `${c.req.query('cal_y')}-${c.req.query('cal_m')}` : '');
+  const month = /^\d{4}-\d{2}$/.test(calQuery) ? calQuery : today.slice(0, 7);
   const selected = c.req.query('date') ?? null;
   const days = calendarDays(month);
 
@@ -105,6 +108,7 @@ routes.get('/', async (c) => {
       </div>
 
       <div class="grid-2">
+        <div class="stack">
         <Card
           title="Visit Calendar"
           actions={
@@ -117,7 +121,26 @@ routes.get('/', async (c) => {
         >
           <div class="cal">
             <div class="cal__head">
-              <strong>{fmtMonth(month)}</strong>
+              <form method="get" action="/" class="btn-row" aria-label="Jump to month">
+                <select name="cal_m" data-autosubmit aria-label="Month">
+                  {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((label, i) => {
+                    const value = String(i + 1).padStart(2, '0');
+                    return <option value={value} selected={month.slice(5) === value}>{label}</option>;
+                  })}
+                </select>
+                <select name="cal_y" data-autosubmit aria-label="Year">
+                  {(() => {
+                    const thisYear = parseInt(today.slice(0, 4), 10);
+                    const calYear = parseInt(month.slice(0, 4), 10);
+                    const from = Math.min(thisYear - 2, calYear);
+                    const to = Math.max(thisYear + 3, calYear);
+                    return Array.from({ length: to - from + 1 }, (_, i) => from + i).map((y) => (
+                      <option value={y} selected={calYear === y}>{y}</option>
+                    ));
+                  })()}
+                </select>
+                <noscript><button type="submit" class="btn btn--sm">Go</button></noscript>
+              </form>
               <span class="btn-row" role="group" aria-label="Calendar labels">
                 <a class={`btn btn--sm ${labelMode === 'vendor' ? 'btn--primary' : ''}`} href={`${keepCal(selected ?? undefined)}&labels=vendor`}>Vendor</a>
                 <a class={`btn btn--sm ${labelMode === 'plan' ? 'btn--primary' : ''}`} href={`${keepCal(selected ?? undefined)}&labels=plan`}>Plan #</a>
@@ -155,20 +178,6 @@ routes.get('/', async (c) => {
           </div>
         </Card>
 
-        <Card title={selected ? fmtDate(selected) : 'Selected Date'} actions={selected && <a class="btn btn--sm" href={keepCal()}>Clear</a>}>
-          {!selected && <p class="muted">Click a date in the calendar to see its visits.</p>}
-          {selected && selectedVisits.length === 0 && <p class="muted">No visits scheduled for this date.</p>}
-          {selectedVisits.map((v) => (
-            <a href={`/visits/${v.id}`} class="dropdown__item">
-              <strong>{v.plan_number} - {v.vendor_name}</strong>
-              <span>{v.description.slice(0, 90)}</span>
-              {visitBadge(v.status)}
-            </a>
-          ))}
-        </Card>
-      </div>
-
-      <div class="grid-2">
         <Card title="Upcoming Visits (next 30 days)" pad={false}>
           {upcoming.length === 0 ? (
             <EmptyState title="No upcoming visits scheduled" />
@@ -188,6 +197,20 @@ routes.get('/', async (c) => {
               </tbody>
             </table>
           )}
+        </Card>
+        </div>
+
+        <div class="stack">
+        <Card title={selected ? fmtDate(selected) : 'Selected Date'} actions={selected && <a class="btn btn--sm" href={keepCal()}>Clear</a>}>
+          {!selected && <p class="muted">Click a date in the calendar to see its visits.</p>}
+          {selected && selectedVisits.length === 0 && <p class="muted">No visits scheduled for this date.</p>}
+          {selectedVisits.map((v) => (
+            <a href={`/visits/${v.id}`} class="dropdown__item">
+              <strong>{v.plan_number} - {v.vendor_name}</strong>
+              <span>{v.description.slice(0, 90)}</span>
+              {visitBadge(v.status)}
+            </a>
+          ))}
         </Card>
 
         <Card title="My Pending Tasks" actions={<a class="btn btn--sm" href="/tasks">All tasks</a>} pad={false}>
@@ -210,6 +233,7 @@ routes.get('/', async (c) => {
             </table>
           )}
         </Card>
+        </div>
       </div>
     </>
   ));

@@ -135,6 +135,7 @@ p { margin: 0.25rem 0; }
 
 .grid-2 { display: grid; grid-template-columns: 2fr 1fr; gap: 1.25rem; align-items: start; }
 @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+.stack { display: grid; gap: 1.25rem; align-content: start; min-width: 0; }
 
 /* ---- Stat cards ---- */
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.75rem; }
@@ -267,7 +268,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary-sof
 
 /* ---- Calendar ---- */
 .cal { width: 100%; }
-.cal__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; }
+.cal__head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+.cal__head select { width: auto; padding: 0.25rem 0.4rem; font-size: 0.85rem; }
 /* minmax(0,...) lets day cells shrink below content width so long vendor
    names truncate with an ellipsis instead of stretching the column. */
 .cal__grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
