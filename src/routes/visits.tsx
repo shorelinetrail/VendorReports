@@ -422,6 +422,29 @@ routes.post('/:id/recommendations/:recId/edit', async (c) => {
   );
 });
 
+routes.post('/:id/recommendations/:recId/reopen', async (c) => {
+  return withVisit(
+    c,
+    (b) => {
+      const p = perms(c, b);
+      return (p.isMaintEngineer || p.isTechEngineer || p.isAdmin) && p.isOpen;
+    },
+    async (b) => {
+      const rec = b.recs.find((r) => r.id === c.req.param('recId'));
+      if (!rec || !['completed', 'cancelled'].includes(rec.status)) throw new Error('Only completed or cancelled recommendations can be reopened.');
+      await updateRow(c.env.DB, 'recommendations', rec.id, {
+        // Back to where it was in the flow: reviewed ones need their action
+        // completed again, unreviewed ones start over as open.
+        status: rec.review_decision ? 'approved' : 'open',
+        completed_at: null, cancelled_at: null, cancellation_reason: null,
+      }, actor(c));
+      // The visit is no longer ready to close.
+      await cancelOpenTasks(c.env.DB, b.visit.id, 'close_visit', actor(c));
+      return 'Recommendation reopened.';
+    }
+  );
+});
+
 routes.post('/:id/recommendations/:recId/sap', async (c) => {
   const form = await c.req.formData();
   const sap = String(form.get('sap_notification_number') ?? '').trim();
@@ -774,6 +797,10 @@ routes.get('/:id', async (c) => {
                           )}
                           <button class="btn btn--sm btn--danger" data-modal={`cancel-rec-${rec.id}`}>Cancel</button>
                         </>
+                      )}
+                      {['completed', 'cancelled'].includes(rec.status) && canEditRec && p.isOpen && (
+                        <ActionButton action={`/visits/${visit.id}/recommendations/${rec.id}/reopen`} label="Reopen"
+                          class="btn btn--sm" confirm="Reopen this recommendation? The visit can't be closed until it is resolved again." />
                       )}
                     </td>
                   </tr>

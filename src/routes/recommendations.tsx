@@ -10,7 +10,7 @@ const routes = new Hono<App>();
 
 type RecRow = Recommendation & {
   plan_number: string; vendor_name: string; created_by_name: string; reviewed_by_name: string | null;
-  maintenance_engineer_id: string; technical_engineer_id: string;
+  maintenance_engineer_id: string; technical_engineer_id: string; visit_status: string;
 };
 
 const FILTERS = [
@@ -31,7 +31,7 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
   const recs = await all<RecRow>(
     c.env.DB,
     `SELECT rec.*, r.plan_number, ve.name AS vendor_name, cb.full_name AS created_by_name, rb.full_name AS reviewed_by_name,
-            v.maintenance_engineer_id, v.technical_engineer_id
+            v.maintenance_engineer_id, v.technical_engineer_id, v.status AS visit_status
      FROM recommendations rec
      JOIN visits v ON v.id = rec.visit_id
      JOIN routines r ON r.id = v.routine_id
@@ -59,9 +59,12 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
   // Complete/cancel belong to the visit's maintenance engineer (or an admin);
   // reviewing is the technical engineer's only recommendation action.
   const canAct = (r: RecRow) => user.role === 'admin' || user.id === r.maintenance_engineer_id;
-  const canEdit = (r: RecRow) =>
-    !['completed', 'cancelled'].includes(r.status) &&
-    (user.role === 'admin' || user.id === r.maintenance_engineer_id || user.id === r.technical_engineer_id);
+  const isEngineer = (r: RecRow) =>
+    user.role === 'admin' || user.id === r.maintenance_engineer_id || user.id === r.technical_engineer_id;
+  const canEdit = (r: RecRow) => !['completed', 'cancelled'].includes(r.status) && isEngineer(r);
+  const canReopen = (r: RecRow) =>
+    ['completed', 'cancelled'].includes(r.status) && isEngineer(r) &&
+    !['completed', 'cancelled'].includes(r.visit_status);
   const sapMissing = (r: RecRow) => r.review_decision === 'request_sap' && !r.sap_notification_number;
 
   return page(c, 'Recommendations', (
@@ -119,6 +122,10 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
                             : <ActionButton action={`/visits/${r.visit_id}/recommendations/${r.id}/complete`} label="Complete" class="btn btn--sm btn--green" />}
                           <button class="btn btn--sm btn--danger" data-modal={`cancel-${r.id}`}>Cancel</button>
                         </>
+                      )}
+                      {canReopen(r) && (
+                        <ActionButton action={`/visits/${r.visit_id}/recommendations/${r.id}/reopen`} label="Reopen"
+                          class="btn btn--sm" confirm="Reopen this recommendation? The visit can't be closed until it is resolved again." />
                       )}
                     </td>
                   </tr>
