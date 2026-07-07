@@ -144,6 +144,8 @@ export interface VisitReport {
   uploaded_by_id: string;
   uploaded_at: string;
   notes: string | null;
+  /** Set when this report supersedes an older one (which is kept). */
+  replaces_id: string | null;
 }
 
 export type Env = {

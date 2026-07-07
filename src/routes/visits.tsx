@@ -288,33 +288,82 @@ routes.post('/:id/notification', async (c) => {
   });
 });
 
+async function storeReport(
+  c: Context<App>,
+  b: VisitBundle,
+  file: File | string | null,
+  notes: string,
+  replacesId: string | null
+): Promise<string | { message: string; redirect: string }> {
+  if (!(file instanceof File) || file.size === 0) throw new Error('Choose a file to upload.');
+  if (file.size > MAX_REPORT_BYTES) throw new Error('Reports are limited to 10 MB.');
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+  if (!REPORT_EXTENSIONS.includes(ext)) throw new Error(`Only ${REPORT_EXTENSIONS.join(', ')} files are accepted.`);
+
+  const key = `${b.visit.id}/${Date.now()}-${file.name.replace(/[^\w.-]+/g, '_')}`;
+  await c.env.REPORTS.put(key, file.stream(), {
+    httpMetadata: { contentType: file.type || 'application/octet-stream' },
+  });
+  await insertRow(c.env.DB, 'visit_reports', {
+    visit_id: b.visit.id, file_key: key, file_name: file.name, file_size: file.size,
+    content_type: file.type || null, uploaded_by_id: c.get('user').id, uploaded_at: now(),
+    notes: notes || null, replaces_id: replacesId,
+  }, actor(c));
+  if (b.visit.status === 'date_confirmed') {
+    await updateRow(c.env.DB, 'visits', b.visit.id, { status: 'report_uploaded' satisfies VisitStatus }, actor(c));
+    await completeOpenTasks(c.env.DB, b.visit.id, 'upload_report', actor(c));
+    const cfg = await getConfig(c.env.DB);
+    await createTaskOnce(c.env.DB, b.visit.id, 'create_recommendations', b.visit.maintenance_engineer_id,
+      addDays(todayStr(), cfg.recommendations_review_days), actor(c));
+  }
+  const message = `Report "${file.name}" ${replacesId ? 'uploaded as a replacement' : 'uploaded'}.`;
+  // If the recommendations stage has already passed, ask whether this new
+  // report means more recommendations are needed.
+  if (['recommendations_created', 'in_review', 'completed'].includes(b.visit.status)) {
+    return { message, redirect: `/visits/${b.visit.id}?prompt-recs=1` };
+  }
+  return message;
+}
+
 routes.post('/:id/reports', async (c) => {
   const form = await c.req.formData();
   const file = form.get('file') as File | string | null;
   const notes = String(form.get('notes') ?? '').trim();
-  return withVisit(c, (b) => perms(c, b).canUploadReport, async (b) => {
-    if (!(file instanceof File) || file.size === 0) throw new Error('Choose a file to upload.');
-    if (file.size > MAX_REPORT_BYTES) throw new Error('Reports are limited to 10 MB.');
-    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
-    if (!REPORT_EXTENSIONS.includes(ext)) throw new Error(`Only ${REPORT_EXTENSIONS.join(', ')} files are accepted.`);
+  return withVisit(c, (b) => perms(c, b).canUploadReport, (b) => storeReport(c, b, file, notes, null));
+});
 
-    const key = `${b.visit.id}/${Date.now()}-${file.name.replace(/[^\w.-]+/g, '_')}`;
-    await c.env.REPORTS.put(key, file.stream(), {
-      httpMetadata: { contentType: file.type || 'application/octet-stream' },
-    });
-    await insertRow(c.env.DB, 'visit_reports', {
-      visit_id: b.visit.id, file_key: key, file_name: file.name, file_size: file.size,
-      content_type: file.type || null, uploaded_by_id: c.get('user').id, uploaded_at: now(), notes: notes || null,
-    }, actor(c));
-    if (b.visit.status === 'date_confirmed') {
-      await updateRow(c.env.DB, 'visits', b.visit.id, { status: 'report_uploaded' satisfies VisitStatus }, actor(c));
-      await completeOpenTasks(c.env.DB, b.visit.id, 'upload_report', actor(c));
-      const cfg = await getConfig(c.env.DB);
-      await createTaskOnce(c.env.DB, b.visit.id, 'create_recommendations', b.visit.maintenance_engineer_id,
-        addDays(todayStr(), cfg.recommendations_review_days), actor(c));
-    }
-    return `Report "${file.name}" uploaded.`;
+routes.post('/:id/reports/:reportId/replace', async (c) => {
+  const form = await c.req.formData();
+  const file = form.get('file') as File | string | null;
+  const notes = String(form.get('notes') ?? '').trim();
+  return withVisit(c, (b) => perms(c, b).canUploadReport, async (b) => {
+    const old = b.reports.find((r) => r.id === c.req.param('reportId'));
+    if (!old) throw new Error('Report not found.');
+    return storeReport(c, b, file, notes, old.id);
   });
+});
+
+// Answering "yes" to the more-recommendations prompt: rewind the workflow to
+// the recommendations stage and give the maintenance engineer a task.
+routes.post('/:id/more-recommendations', async (c) => {
+  return withVisit(
+    c,
+    (b) => {
+      const p = perms(c, b);
+      return p.isCoordinator || p.isMaintEngineer || p.isAdmin;
+    },
+    async (b) => {
+      const db = c.env.DB;
+      if (b.visit.status === 'completed') {
+        const status: VisitStatus = b.recs.some((r) => r.status === 'in_review') ? 'in_review' : 'recommendations_created';
+        await updateRow(db, 'visits', b.visit.id, { status, completed_at: null }, actor(c));
+      }
+      const cfg = await getConfig(db);
+      await createTaskOnce(db, b.visit.id, 'create_recommendations', b.visit.maintenance_engineer_id,
+        addDays(todayStr(), cfg.recommendations_review_days), actor(c), 'New report added - review for additional recommendations');
+      return `${b.team.maintEngineer?.full_name ?? 'The maintenance engineer'} has been given a task to review the new report for recommendations.`;
+    }
+  );
 });
 
 async function serveReport(c: Context<App>, disposition: 'attachment' | 'inline'): Promise<Response> {
@@ -875,6 +924,7 @@ routes.get('/:id', async (c) => {
   const awaitingResponse = (rec: Rec) => rec.status === 'approved' && !!rec.action_assigned_to_id && !rec.action_response;
   const canRespond = (rec: Rec) => awaitingResponse(rec) && (user.id === rec.action_assigned_to_id || p.isAdmin);
   const sapMissing = (rec: Rec) => rec.review_decision === 'request_sap' && !rec.sap_notification_number;
+  const replacedIds = new Set(reports.map((r) => r.replaces_id).filter(Boolean));
 
   return page(c, `Visit ${routine.plan_number}`, (
     <>
@@ -970,20 +1020,26 @@ routes.get('/:id', async (c) => {
           {visit.no_report_reason && reports.length === 0 && (
             <p class="waiting">No report available - {visit.no_report_reason}</p>
           )}
-          {reports.map((r) => (
-            <div class="dropdown__item" style="border:1px solid var(--border); margin-top:0.4rem">
-              <strong>{r.file_name}</strong>
-              <span class="muted">Uploaded by {r.uploaded_by_name} on {fmtDateTime(r.uploaded_at)}{r.notes ? ` - ${r.notes}` : ''}</span>
-              <span class="btn-row mt" style="margin-top:0.4rem">
-                <a class="btn btn--sm btn--icon" href={`/visits/${visit.id}/reports/${r.id}/view`} target="_blank" title="View in browser" aria-label="View report in browser"><Icon name="eye" size={15} /></a>
-                <a class="btn btn--sm btn--icon" href={`/visits/${visit.id}/reports/${r.id}/download`} title="Download report" aria-label="Download report"><Icon name="download" size={15} /></a>
-                {p.isAdmin && (
-                  <IconAction action={`/visits/${visit.id}/reports/${r.id}/delete`} icon="trash" label="Delete report"
-                    class="btn--danger" confirm={`Delete report "${r.file_name}"?`} />
-                )}
-              </span>
-            </div>
-          ))}
+          {reports.map((r) => {
+            const isReplaced = replacedIds.has(r.id);
+            return (
+              <div class="dropdown__item" style={`border:1px solid var(--border); margin-top:0.4rem${isReplaced ? '; opacity:0.6' : ''}`}>
+                <strong>{r.file_name} {isReplaced && <Badge tone="gray">Replaced</Badge>}{r.replaces_id && <Badge tone="blue">Replacement</Badge>}</strong>
+                <span class="muted">Uploaded by {r.uploaded_by_name} on {fmtDateTime(r.uploaded_at)}{r.notes ? ` - ${r.notes}` : ''}</span>
+                <span class="btn-row mt" style="margin-top:0.4rem">
+                  <a class="btn btn--sm btn--icon" href={`/visits/${visit.id}/reports/${r.id}/view`} target="_blank" title="View in browser" aria-label="View report in browser"><Icon name="eye" size={15} /></a>
+                  <a class="btn btn--sm btn--icon" href={`/visits/${visit.id}/reports/${r.id}/download`} title="Download report" aria-label="Download report"><Icon name="download" size={15} /></a>
+                  {p.canUploadReport && !isReplaced && (
+                    <IconModalBtn modal={`replace-report-${r.id}`} icon="rotate" label="Replace report (keeps this version)" />
+                  )}
+                  {p.isAdmin && (
+                    <IconAction action={`/visits/${visit.id}/reports/${r.id}/delete`} icon="trash" label="Delete report"
+                      class="btn--danger" confirm={`Delete report "${r.file_name}"?`} />
+                  )}
+                </span>
+              </div>
+            );
+          })}
         </Card>
 
         <Card title="Assigned Team" actions={p.canReassign && <button class="btn btn--sm" data-modal="reassign">Reassign</button>}>
@@ -1113,6 +1169,34 @@ routes.get('/:id', async (c) => {
       </Card>
 
       {/* ---- Modals ---- */}
+      {(p.isCoordinator || p.isMaintEngineer || p.isAdmin) && c.req.query('prompt-recs') === '1' && (
+        <Modal id="prompt-recs" title="More recommendations needed?" autoOpen>
+          <div class="modal__content">
+            <p>A report was added after the recommendations stage. Does it raise anything that needs new recommendations?</p>
+            <div class="modal__buttons">
+              <button type="button" class="btn" data-close>No, nothing new</button>
+              <ActionButton action={`/visits/${visit.id}/more-recommendations`} label="Yes - reopen for recommendations"
+                class="btn btn--primary" busy="Reopening…" />
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {p.canUploadReport && reports.filter((r) => !replacedIds.has(r.id)).map((r) => (
+        <Modal id={`replace-report-${r.id}`} title={`Replace: ${r.file_name}`}>
+          <form method="post" action={`/visits/${visit.id}/reports/${r.id}/replace`} enctype="multipart/form-data">
+            <p class="muted">The current file is kept and marked as replaced; the new file becomes the live version.</p>
+            <Field label="New file" hint="PDF, Word or Excel, up to 10 MB.">
+              <input type="file" name="file" required accept=".pdf,.doc,.docx,.xls,.xlsx" />
+            </Field>
+            <Field label="Notes (optional)">
+              <textarea name="notes" rows={2} placeholder="What changed in this version…"></textarea>
+            </Field>
+            <ModalButtons submit="Replace Report" busy="Uploading…" />
+          </form>
+        </Modal>
+      ))}
+
       {p.canClose && c.req.query('prompt-close') === '1' && (
         <Modal id="prompt-close" title="Close this visit?" autoOpen>
           <div class="modal__content">

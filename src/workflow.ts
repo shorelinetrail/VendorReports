@@ -203,7 +203,10 @@ export function visitPerms(user: User, visit: Visit, reportCount: number, recs: 
   return {
     isAdmin, isCoordinator, isMaintEngineer, isTechEngineer, isOpen, hasReports, allRecsDone,
     canConfirmDate: (isCoordinator || isAdmin) && visit.status === 'scheduled',
-    canUploadReport: (isCoordinator || isAdmin) && (visit.status === 'date_confirmed' || (reportCount > 0 && isOpen)),
+    // Reports/attachments can be added at any point in the visit's life
+    // (including after completion - a late report prompts a recommendations
+    // check); only cancelled visits are closed to uploads.
+    canUploadReport: (isCoordinator || isAdmin) && visit.status !== 'cancelled',
     canCreateRec: (isMaintEngineer || isAdmin) && hasReports && isOpen,
     canReview: isTechEngineer || isAdmin,
     canReschedule: (isCoordinator || isAdmin) && isOpen,
