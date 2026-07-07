@@ -76,6 +76,8 @@ export interface Visit {
   rescheduled_at: string | null;
   rescheduled_from: string | null;
   completed_at: string | null;
+  cancelled_at: string | null;
+  cancellation_reason: string | null;
   created_at: string;
   updated_at: string;
 }

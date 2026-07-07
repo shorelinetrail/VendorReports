@@ -10,7 +10,7 @@ import { all, first, insertRow, updateRow, deleteRow, now } from '../db';
 import { addDays, fmtDate, fmtDateTime, todayStr } from '../dates';
 import { flash, activeUsers } from '../auth';
 import {
-  cancelOpenTasks, completeOpenTasks, createTask, getConfig, maybeCreateCloseTask, visitPerms, waitingFor,
+  cancelOpenTasks, completeOpenTasks, createTask, createTaskOnce, getConfig, maybeCreateCloseTask, visitPerms, waitingFor,
 } from '../workflow';
 import {
   page, Card, PageHeader, EmptyState, Modal, ModalButtons, Field, ActionButton, Badge, visitBadge, recBadge, Icon,
@@ -33,6 +33,7 @@ routes.get('/', async (c) => {
   const user = c.get('user');
   const statusFilter = c.req.query('status') ?? 'all';
   const q = (c.req.query('q') ?? '').trim();
+  const mine = c.req.query('mine') === '1';
   const canManage = user.role === 'admin' || user.role === 'vendor_coordinator';
 
   const where: string[] = [];
@@ -44,6 +45,10 @@ routes.get('/', async (c) => {
   if (q) {
     where.push('(r.plan_number LIKE ? OR ve.name LIKE ? OR r.description LIKE ? OR v.notification_number LIKE ?)');
     params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+  }
+  if (mine) {
+    where.push('(v.vendor_coordinator_id = ? OR v.maintenance_engineer_id = ? OR v.technical_engineer_id = ?)');
+    params.push(user.id, user.id, user.id);
   }
   const visits = await all<Visit & { plan_number: string; vendor_name: string }>(
     db,
@@ -72,8 +77,11 @@ routes.get('/', async (c) => {
               <option value={value} selected={statusFilter === value}>{label}</option>
             ))}
           </select>
+          <label class="check" style="margin:0">
+            <input type="checkbox" name="mine" value="1" checked={mine} data-autosubmit /> Assigned to me
+          </label>
           <button class="btn btn--sm" type="submit">Search</button>
-          {(q || statusFilter !== 'all') && <a class="btn btn--sm btn--ghost" href="/visits">Clear</a>}
+          {(q || statusFilter !== 'all' || mine) && <a class="btn btn--sm btn--ghost" href="/visits">Clear</a>}
           <span class="muted">{visits.length} visit{visits.length === 1 ? '' : 's'}</span>
         </form>
         {visits.length === 0 ? (
@@ -167,7 +175,7 @@ routes.post('/', async (c) => {
 
 interface VisitBundle {
   visit: Visit;
-  routine: Routine & { vendor_name: string };
+  routine: Routine & { vendor_name: string; vendor_email: string | null; vendor_phone: string | null };
   recs: (Recommendation & { created_by_name: string; reviewed_by_name: string | null; action_assigned_name: string | null })[];
   reports: (VisitReport & { uploaded_by_name: string })[];
   tasks: Task[];
@@ -179,8 +187,11 @@ async function loadVisit(c: Context<App>, id: string): Promise<VisitBundle | nul
   const visit = await first<Visit>(db, 'SELECT * FROM visits WHERE id = ?', id);
   if (!visit) return null;
   const [routine, recs, reports, tasks, coordinator, maintEngineer, techEngineer] = await Promise.all([
-    first<Routine & { vendor_name: string }>(
-      db, 'SELECT r.*, v.name AS vendor_name FROM routines r JOIN vendors v ON v.id = r.vendor_id WHERE r.id = ?', visit.routine_id),
+    first<Routine & { vendor_name: string; vendor_email: string | null; vendor_phone: string | null }>(
+      db,
+      `SELECT r.*, v.name AS vendor_name, v.contact_email AS vendor_email, v.contact_phone AS vendor_phone
+       FROM routines r JOIN vendors v ON v.id = r.vendor_id WHERE r.id = ?`,
+      visit.routine_id),
     all<VisitBundle['recs'][number]>(
       db,
       `SELECT rec.*, cb.full_name AS created_by_name, rb.full_name AS reviewed_by_name, aa.full_name AS action_assigned_name
@@ -252,6 +263,10 @@ routes.post('/:id/confirm-date', async (c) => {
       confirmed_date: date, confirmed_at: now(), status: 'date_confirmed' satisfies VisitStatus,
     }, actor(c));
     await completeOpenTasks(c.env.DB, b.visit.id, 'confirm_visit_date', actor(c));
+    // Next step in the chain: the report is due report_upload_weeks after the visit.
+    const cfg = await getConfig(c.env.DB);
+    await createTaskOnce(c.env.DB, b.visit.id, 'upload_report', b.visit.vendor_coordinator_id,
+      addDays(date, cfg.report_upload_weeks * 7), actor(c));
     return `Visit date confirmed for ${fmtDate(date)}.`;
   });
 });
@@ -286,6 +301,9 @@ routes.post('/:id/reports', async (c) => {
     if (b.visit.status === 'date_confirmed') {
       await updateRow(c.env.DB, 'visits', b.visit.id, { status: 'report_uploaded' satisfies VisitStatus }, actor(c));
       await completeOpenTasks(c.env.DB, b.visit.id, 'upload_report', actor(c));
+      const cfg = await getConfig(c.env.DB);
+      await createTaskOnce(c.env.DB, b.visit.id, 'create_recommendations', b.visit.maintenance_engineer_id,
+        addDays(todayStr(), cfg.recommendations_review_days), actor(c));
     }
     return `Report "${file.name}" uploaded.`;
   });
@@ -327,6 +345,9 @@ routes.post('/:id/no-report', async (c) => {
       no_report_reason: reason, status: 'report_uploaded' satisfies VisitStatus,
     }, actor(c));
     await completeOpenTasks(c.env.DB, b.visit.id, 'upload_report', actor(c));
+    const cfg = await getConfig(c.env.DB);
+    await createTaskOnce(c.env.DB, b.visit.id, 'create_recommendations', b.visit.maintenance_engineer_id,
+      addDays(todayStr(), cfg.recommendations_review_days), actor(c));
     return 'Marked as no report available.';
   });
 });
@@ -350,6 +371,7 @@ routes.post('/:id/recommendations', async (c) => {
     }, actor(c));
     if (requiresReview) {
       await updateRow(db, 'visits', b.visit.id, { status: 'in_review' satisfies VisitStatus }, actor(c));
+      await completeOpenTasks(db, b.visit.id, 'create_recommendations', actor(c));
       const cfg = await getConfig(db);
       await createTask(db, b.visit.id, 'technical_review', b.visit.technical_engineer_id,
         addDays(todayStr(), cfg.technical_review_days), actor(c), `Review recommendation: ${description.slice(0, 80)}`);
@@ -419,6 +441,11 @@ routes.post('/:id/recommendations/:recId/review', async (c) => {
     // Once nothing is left awaiting review, the ball is back with the
     // maintenance engineer - reflect that in the visit status/banner.
     const stillInReview = await first(db, "SELECT id FROM recommendations WHERE visit_id = ? AND status = 'in_review'", b.visit.id);
+    if (!stillInReview) {
+      // Nothing left to review: close review tasks regardless of assignee
+      // (an admin may have reviewed on the assignee's behalf).
+      await completeOpenTasks(db, b.visit.id, 'technical_review', actor(c));
+    }
     if (!stillInReview && b.visit.status === 'in_review') {
       await updateRow(db, 'visits', b.visit.id, { status: 'recommendations_created' satisfies VisitStatus }, actor(c));
     }
@@ -568,18 +595,71 @@ routes.post('/:id/recommendations/:recId/cancel', async (c) => {
 
 routes.post('/:id/close', async (c) => {
   return withVisit(c, (b) => perms(c, b).canClose, async (b) => {
-    await updateRow(c.env.DB, 'visits', b.visit.id, {
+    const db = c.env.DB;
+    await updateRow(db, 'visits', b.visit.id, {
       status: 'completed' satisfies VisitStatus, completed_at: now(),
     }, actor(c));
-    await completeOpenTasks(c.env.DB, b.visit.id, 'close_visit', actor(c));
+    await completeOpenTasks(db, b.visit.id, 'close_visit', actor(c));
+    // A completed visit should have no open tasks left - sweep any stragglers.
+    for (const t of b.tasks) {
+      if (t.task_type !== 'close_visit' && ['pending', 'in_progress', 'overdue'].includes(t.status)) {
+        await updateRow(db, 'tasks', t.id, { status: 'cancelled' }, actor(c));
+      }
+    }
     return 'Visit closed.';
+  });
+});
+
+routes.post('/:id/cancel', async (c) => {
+  const form = await c.req.formData();
+  const reason = String(form.get('reason') ?? '').trim();
+  return withVisit(c, (b) => perms(c, b).canCancel, async (b) => {
+    if (!reason) throw new Error('A cancellation reason is required.');
+    const db = c.env.DB;
+    await updateRow(db, 'visits', b.visit.id, {
+      status: 'cancelled' satisfies VisitStatus, cancelled_at: now(), cancellation_reason: reason,
+    }, actor(c));
+    for (const t of b.tasks) {
+      if (['pending', 'in_progress', 'overdue'].includes(t.status)) {
+        await updateRow(db, 'tasks', t.id, { status: 'cancelled' }, actor(c));
+      }
+    }
+    return 'Visit cancelled.';
   });
 });
 
 routes.post('/:id/reopen', async (c) => {
   return withVisit(c, (b) => perms(c, b).canReopen, async (b) => {
-    const status: VisitStatus = b.recs.some((r) => r.status === 'in_review') ? 'in_review' : 'recommendations_created';
-    await updateRow(c.env.DB, 'visits', b.visit.id, { status, completed_at: null }, actor(c));
+    const db = c.env.DB;
+    // Put the visit back at the right point in the workflow.
+    let status: VisitStatus;
+    if (b.recs.length > 0) {
+      status = b.recs.some((r) => r.status === 'in_review') ? 'in_review' : 'recommendations_created';
+    } else if (b.reports.length > 0 || b.visit.no_report_reason) {
+      status = 'report_uploaded';
+    } else if (b.visit.confirmed_date) {
+      status = 'date_confirmed';
+    } else {
+      status = 'scheduled';
+    }
+    await updateRow(db, 'visits', b.visit.id, {
+      status, completed_at: null, cancelled_at: null, cancellation_reason: null,
+    }, actor(c));
+    // Re-seed the next-step task so the workflow chain resumes.
+    const cfg = await getConfig(db);
+    if (status === 'scheduled') {
+      await createTaskOnce(db, b.visit.id, 'confirm_visit_date', b.visit.vendor_coordinator_id,
+        addDays(b.visit.scheduled_date, -cfg.visit_confirmation_days), actor(c));
+    } else if (status === 'date_confirmed') {
+      await createTaskOnce(db, b.visit.id, 'upload_report', b.visit.vendor_coordinator_id,
+        addDays(b.visit.confirmed_date!, cfg.report_upload_weeks * 7), actor(c));
+    } else if (status === 'report_uploaded') {
+      await createTaskOnce(db, b.visit.id, 'create_recommendations', b.visit.maintenance_engineer_id,
+        addDays(todayStr(), cfg.recommendations_review_days), actor(c));
+    } else if (status === 'in_review') {
+      await createTaskOnce(db, b.visit.id, 'technical_review', b.visit.technical_engineer_id,
+        addDays(todayStr(), cfg.technical_review_days), actor(c));
+    }
     return 'Visit reopened.';
   });
 });
@@ -598,7 +678,10 @@ routes.post('/:id/reschedule', async (c) => {
       status: 'scheduled' satisfies VisitStatus,
       reschedule_reason: reason, rescheduled_at: now(), rescheduled_from: oldDate,
     }, actor(c));
+    // The workflow restarts at confirmation - drop the later-step tasks too.
     await cancelOpenTasks(db, b.visit.id, 'confirm_visit_date', actor(c));
+    await cancelOpenTasks(db, b.visit.id, 'upload_report', actor(c));
+    await cancelOpenTasks(db, b.visit.id, 'create_recommendations', actor(c));
     const cfg = await getConfig(db);
     await createTask(db, b.visit.id, 'confirm_visit_date', b.visit.vendor_coordinator_id,
       addDays(newDate, -cfg.visit_confirmation_days), actor(c),
@@ -670,8 +753,15 @@ function reopenActivity(auditRows: AuditEvent[]): Activity[] {
       const oldData = JSON.parse(row.old_data ?? '{}');
       const newData = JSON.parse(row.new_data ?? '{}');
       const by = row.actor_name ? ` by ${row.actor_name}` : '';
-      if (row.table_name === 'visits' && oldData.status === 'completed' && newData.status !== 'completed') {
+      const CLOSED = ['completed', 'cancelled'];
+      if (row.table_name === 'visits' && CLOSED.includes(oldData.status) && !CLOSED.includes(newData.status)) {
         items.push({ date: row.created_at, event: 'Visit reopened', details: `Reopened${by}` });
+      }
+      if (row.table_name === 'visits' && oldData.status !== 'cancelled' && newData.status === 'cancelled') {
+        items.push({
+          date: row.created_at, event: 'Visit cancelled',
+          details: `${newData.cancellation_reason ?? ''}${by ? ` (${by.trim()})` : ''}`.trim() || undefined,
+        });
       }
       if (row.table_name === 'recommendations' &&
           ['completed', 'cancelled'].includes(oldData.status) && ['open', 'approved'].includes(newData.status)) {
@@ -754,7 +844,11 @@ routes.get('/:id', async (c) => {
       </PageHeader>
 
       {visit.status === 'cancelled' ? (
-        <Card><Badge tone="gray">Cancelled</Badge> This visit was cancelled.</Card>
+        <Card>
+          <Badge tone="gray">Cancelled</Badge>{' '}
+          This visit was cancelled{visit.cancelled_at ? ` on ${fmtDate(visit.cancelled_at)}` : ''}
+          {visit.cancellation_reason ? ` - ${visit.cancellation_reason}` : '.'}
+        </Card>
       ) : (
         <Card>
           <div class="stepper">
@@ -778,7 +872,7 @@ routes.get('/:id', async (c) => {
       )}
 
       {/* Workflow actions - only what the current user can actually do right now */}
-      {(p.canConfirmDate || p.canUploadReport || p.canCreateRec || p.canReschedule || p.canClose || p.canReopen) && (
+      {(p.canConfirmDate || p.canUploadReport || p.canCreateRec || p.canReschedule || p.canCancel || p.canClose || p.canReopen) && (
         <Card title="Actions">
           <div class="btn-row">
             {p.canConfirmDate && <button class="btn btn--primary" data-modal="confirm-date"><Icon name="check" size={16} /> Confirm Visit Date</button>}
@@ -788,6 +882,7 @@ routes.get('/:id', async (c) => {
             )}
             {p.canCreateRec && <button class="btn btn--primary" data-modal="add-rec"><Icon name="plus" size={16} /> Add Recommendation</button>}
             {p.canReschedule && <button class="btn" data-modal="reschedule">Reschedule</button>}
+            {p.canCancel && <button class="btn btn--danger" data-modal="cancel-visit">Cancel Visit</button>}
             {p.canClose && (
               <ActionButton action={`/visits/${visit.id}/close`} label="Close Visit" class="btn btn--green"
                 confirm="Close this visit? All recommendations are resolved." busy="Closing…" />
@@ -806,6 +901,15 @@ routes.get('/:id', async (c) => {
             <div><dt>Status</dt><dd>{visitBadge(visit.status)}</dd></div>
             <div><dt>Scheduled Date</dt><dd>{fmtDate(visit.scheduled_date)}</dd></div>
             <div><dt>Confirmed Date</dt><dd>{fmtDate(visit.confirmed_date)}</dd></div>
+            <div>
+              <dt>Vendor Contact</dt>
+              <dd>
+                {routine.vendor_email ? <a href={`mailto:${routine.vendor_email}`}>{routine.vendor_email}</a> : null}
+                {routine.vendor_email && routine.vendor_phone ? <br /> : null}
+                {routine.vendor_phone ? <a href={`tel:${routine.vendor_phone}`}>{routine.vendor_phone}</a> : null}
+                {!routine.vendor_email && !routine.vendor_phone && '-'}
+              </dd>
+            </div>
             <div>
               <dt>Notification #</dt>
               <dd>
@@ -1000,6 +1104,18 @@ routes.get('/:id', async (c) => {
           <ModalButtons submit={routine.requires_technical_review ? 'Create & Send for Review' : 'Create Recommendation'} />
         </form>
       </Modal>
+
+      {p.canCancel && (
+        <Modal id="cancel-visit" title="Cancel Visit">
+          <form method="post" action={`/visits/${visit.id}/cancel`} data-confirm="Cancel this visit? All its open tasks will be cancelled too.">
+            <p class="muted">The visit and all its open tasks are cancelled. The assigned team can reopen it later if needed.</p>
+            <Field label="Cancellation reason">
+              <textarea name="reason" rows={3} required placeholder="e.g. vendor contract ended, duplicate visit…"></textarea>
+            </Field>
+            <ModalButtons submit="Cancel Visit" danger busy="Cancelling…" />
+          </form>
+        </Modal>
+      )}
 
       <Modal id="reschedule" title="Reschedule Visit">
         <form method="post" action={`/visits/${visit.id}/reschedule`}>

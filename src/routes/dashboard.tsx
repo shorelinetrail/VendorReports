@@ -87,6 +87,26 @@ routes.get('/', async (c) => {
       : Promise.resolve([] as CalVisit[]),
   ]);
 
+  // Stalled visits: open visits whose workflow task is past due - the chase-up
+  // view for coordinators/admins (assignees already see their own overdue tasks).
+  let needsAttention: { id: string; status: VisitStatus; plan_number: string; vendor_name: string; task_type: TaskType; due_date: string; assignee_name: string }[] = [];
+  if (user.role === 'admin' || user.role === 'vendor_coordinator') {
+    const rows = await all<(typeof needsAttention)[number]>(
+      db,
+      `SELECT v.id, v.status, r.plan_number, ve.name AS vendor_name, t.task_type, t.due_date, u.full_name AS assignee_name
+       FROM visits v
+       JOIN routines r ON r.id = v.routine_id
+       JOIN vendors ve ON ve.id = r.vendor_id
+       JOIN tasks t ON t.visit_id = v.id AND t.status IN ('pending', 'in_progress', 'overdue') AND t.due_date < ?
+       JOIN users u ON u.id = t.assigned_to_id
+       WHERE v.status NOT IN ('completed', 'cancelled')
+       ORDER BY t.due_date`,
+      today
+    );
+    const seen = new Set<string>();
+    needsAttention = rows.filter((r) => !seen.has(r.id) && seen.add(r.id) !== undefined).slice(0, 6);
+  }
+
   const overdueCount = myTasks.filter((t) => isTaskOverdue(t.status, t.due_date)).length;
   const byDay = new Map<string, CalVisit[]>();
   for (const v of calVisits) {
@@ -106,6 +126,28 @@ routes.get('/', async (c) => {
         <StatCard label="Open Recommendations" value={counts?.open_recs ?? 0} href="/recommendations" icon="file" tone="purple" />
         <StatCard label="Completed This Month" value={counts?.completed_month ?? 0} href="/visits?status=completed" icon="trend" tone="gray" />
       </div>
+
+      {needsAttention.length > 0 && (
+        <Card title="Needs Attention" pad={false}>
+          <table class="tbl">
+            <tbody>
+              {needsAttention.map((v) => (
+                <tr data-href={`/visits/${v.id}`}>
+                  <td>
+                    <a class="rowlink" href={`/visits/${v.id}`}>{v.plan_number}</a>
+                    <div class="muted">{v.vendor_name}</div>
+                  </td>
+                  <td>{visitBadge(v.status)}</td>
+                  <td class="text-red">
+                    {TASK_TYPE_LABELS[v.task_type]} overdue since {fmtDate(v.due_date)}
+                    <div class="muted">Waiting on {v.assignee_name}</div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
 
       <div class="grid-2">
         <div class="stack">

@@ -127,6 +127,21 @@ export async function createTask(
 
 const OPEN_TASK_STATUSES = "('pending', 'in_progress', 'overdue')";
 
+/** Creates a task unless one of the same type is already open on the visit. */
+export async function createTaskOnce(
+  db: D1Database,
+  visitId: string,
+  type: TaskType,
+  assignedToId: string,
+  dueDate: string,
+  actorId: string | null,
+  notes?: string
+) {
+  const open = await first(
+    db, `SELECT id FROM tasks WHERE visit_id = ? AND task_type = ? AND status IN ${OPEN_TASK_STATUSES}`, visitId, type);
+  if (!open) await createTask(db, visitId, type, assignedToId, dueDate, actorId, notes);
+}
+
 /** Marks open tasks of a type on a visit as completed (optionally only those assigned to one user). */
 export async function completeOpenTasks(db: D1Database, visitId: string, type: TaskType, actorId: string | null, assignedToId?: string) {
   const rows = await all<{ id: string }>(
@@ -152,11 +167,7 @@ export async function maybeCreateCloseTask(db: D1Database, visit: Visit, actorId
   const recs = await all<Recommendation>(db, 'SELECT * FROM recommendations WHERE visit_id = ?', visit.id);
   const allDone = recs.length > 0 && recs.every((r) => r.status === 'completed' || r.status === 'cancelled');
   if (!allDone || visit.status === 'completed' || visit.status === 'cancelled') return;
-  const open = await first(
-    db, `SELECT id FROM tasks WHERE visit_id = ? AND task_type = 'close_visit' AND status IN ${OPEN_TASK_STATUSES}`, visit.id);
-  if (!open) {
-    await createTask(db, visit.id, 'close_visit', visit.maintenance_engineer_id, addDays(todayStr(), 3), actorId);
-  }
+  await createTaskOnce(db, visit.id, 'close_visit', visit.maintenance_engineer_id, addDays(todayStr(), 3), actorId);
 }
 
 // ---- Per-visit permissions (single source of truth for who can do what) ----
@@ -174,6 +185,7 @@ export interface VisitPerms {
   canCreateRec: boolean;
   canReview: boolean;
   canReschedule: boolean;
+  canCancel: boolean;
   canClose: boolean;
   canReopen: boolean;
   canReassign: boolean;
@@ -195,10 +207,12 @@ export function visitPerms(user: User, visit: Visit, reportCount: number, recs: 
     canCreateRec: (isMaintEngineer || isAdmin) && hasReports && isOpen,
     canReview: isTechEngineer || isAdmin,
     canReschedule: (isCoordinator || isAdmin) && isOpen,
+    canCancel: (isCoordinator || isAdmin) && isOpen,
     canClose: (isMaintEngineer || isAdmin) && isOpen && allRecsDone,
-    // The assigned team (or an admin) may reopen to add missed
-    // recommendations; it's audited, so who reopened is always on record.
-    canReopen: (isCoordinator || isMaintEngineer || isTechEngineer || isAdmin) && visit.status === 'completed',
+    // The assigned team (or an admin) may reopen completed AND cancelled
+    // visits; it's audited, so who reopened is always on record.
+    canReopen: (isCoordinator || isMaintEngineer || isTechEngineer || isAdmin) &&
+      (visit.status === 'completed' || visit.status === 'cancelled'),
     canReassign: isAdmin && isOpen,
   };
 }
