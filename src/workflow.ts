@@ -196,9 +196,9 @@ export function visitPerms(user: User, visit: Visit, reportCount: number, recs: 
     canReview: isTechEngineer || isAdmin,
     canReschedule: (isCoordinator || isAdmin) && isOpen,
     canClose: (isMaintEngineer || isAdmin) && isOpen && allRecsDone,
-    // Any signed-in user may reopen (it's audited); this lets missed
-    // recommendations be added after the fact without waiting for an admin.
-    canReopen: visit.status === 'completed',
+    // The assigned team (or an admin) may reopen to add missed
+    // recommendations; it's audited, so who reopened is always on record.
+    canReopen: (isCoordinator || isMaintEngineer || isTechEngineer || isAdmin) && visit.status === 'completed',
     canReassign: isAdmin && isOpen,
   };
 }
