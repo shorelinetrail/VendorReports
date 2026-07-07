@@ -239,6 +239,24 @@ async function getNotifications(c: Context<App>): Promise<Notification[]> {
       });
     }
   }
+  // Overdue recommendations chase whoever owes the follow-through: the action
+  // assignee, the visit's maintenance engineer, and admins.
+  const overdueRecs = await all<{ description: string; due_date: string; visit_id: string; plan_number: string }>(
+    c.env.DB,
+    `SELECT rec.description, rec.due_date, rec.visit_id, r.plan_number
+     FROM recommendations rec JOIN visits v ON v.id = rec.visit_id JOIN routines r ON r.id = v.routine_id
+     WHERE rec.due_date < ? AND rec.status IN ('open', 'in_review', 'approved')
+       AND v.status NOT IN ('completed', 'cancelled')
+       AND (? OR rec.action_assigned_to_id = ? OR v.maintenance_engineer_id = ?)
+     ORDER BY rec.due_date LIMIT 3`,
+    todayStr(), isAdmin(user) ? 1 : 0, user.id, user.id
+  );
+  for (const r of overdueRecs) {
+    items.push({
+      label: 'Recommendation overdue', detail: `${r.plan_number}: ${r.description.slice(0, 60)}`,
+      due: r.due_date, overdue: true, href: `/visits/${r.visit_id}`,
+    });
+  }
   return items;
 }
 

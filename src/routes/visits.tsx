@@ -17,7 +17,7 @@ import {
 } from '../ui';
 import {
   isAdmin, REVIEW_DECISION_LABELS, ROLE_LABELS, TASK_TYPE_LABELS, VISIT_STATUS_LABELS,
-  type App, type Recommendation, type Routine, type Task, type User, type Vendor, type Visit, type VisitReport, type VisitStatus,
+  type App, type Recommendation, type Routine, type Task, type User, type Vendor, type Visit, type VisitComment, type VisitReport, type VisitStatus,
 } from '../types';
 import type { Context } from 'hono';
 
@@ -180,6 +180,7 @@ interface VisitBundle {
   recs: (Recommendation & { created_by_name: string; reviewed_by_name: string | null; action_assigned_name: string | null })[];
   reports: (VisitReport & { uploaded_by_name: string })[];
   tasks: Task[];
+  comments: (VisitComment & { author_name: string })[];
   team: { coordinator: User | null; maintEngineer: User | null; techEngineer: User | null };
 }
 
@@ -187,7 +188,7 @@ async function loadVisit(c: Context<App>, id: string): Promise<VisitBundle | nul
   const db = c.env.DB;
   const visit = await first<Visit>(db, 'SELECT * FROM visits WHERE id = ?', id);
   if (!visit) return null;
-  const [routine, recs, reports, tasks, coordinator, maintEngineer, techEngineer] = await Promise.all([
+  const [routine, recs, reports, tasks, comments, coordinator, maintEngineer, techEngineer] = await Promise.all([
     first<VisitBundle['routine']>(
       db,
       `SELECT r.*, v.name AS vendor_name, v.contact_name AS vendor_contact,
@@ -209,12 +210,17 @@ async function loadVisit(c: Context<App>, id: string): Promise<VisitBundle | nul
        WHERE vr.visit_id = ? ORDER BY vr.uploaded_at DESC`,
       id),
     all<Task>(db, 'SELECT * FROM tasks WHERE visit_id = ? ORDER BY due_date', id),
+    all<VisitBundle['comments'][number]>(
+      db,
+      `SELECT vc.*, u.full_name AS author_name FROM visit_comments vc JOIN users u ON u.id = vc.author_id
+       WHERE vc.visit_id = ? ORDER BY vc.created_at DESC`,
+      id),
     first<User>(db, 'SELECT * FROM users WHERE id = ?', visit.vendor_coordinator_id),
     first<User>(db, 'SELECT * FROM users WHERE id = ?', visit.maintenance_engineer_id),
     first<User>(db, 'SELECT * FROM users WHERE id = ?', visit.technical_engineer_id),
   ]);
   if (!routine) return null;
-  return { visit, routine, recs, reports, tasks, team: { coordinator, maintEngineer, techEngineer } };
+  return { visit, routine, recs, reports, tasks, comments, team: { coordinator, maintEngineer, techEngineer } };
 }
 
 /** Guard for action endpoints: loads the bundle and bails with a flash on failure. */
@@ -630,6 +636,33 @@ routes.post('/:id/cancel', async (c) => {
   });
 });
 
+routes.post('/:id/comments', async (c) => {
+  const form = await c.req.formData();
+  const body = String(form.get('body') ?? '').trim();
+  return withVisit(c, () => true, async (b) => {
+    if (!body) throw new Error('Write a comment first.');
+    await insertRow(c.env.DB, 'visit_comments', {
+      visit_id: b.visit.id, author_id: c.get('user').id, body, created_at: now(),
+    }, actor(c));
+    return 'Comment added.';
+  });
+});
+
+routes.post('/:id/comments/:commentId/delete', async (c) => {
+  return withVisit(
+    c,
+    () => true, // author/admin checked against the comment below
+    async (b) => {
+      const comment = b.comments.find((cm) => cm.id === c.req.param('commentId'));
+      if (!comment) throw new Error('Comment not found.');
+      const user = c.get('user');
+      if (comment.author_id !== user.id && !isAdmin(user)) throw new Error('Only the author or an admin can delete a comment.');
+      await deleteRow(c.env.DB, 'visit_comments', comment.id, actor(c));
+      return 'Comment deleted.';
+    }
+  );
+});
+
 routes.post('/:id/reopen', async (c) => {
   return withVisit(c, (b) => perms(c, b).canReopen, async (b) => {
     const db = c.env.DB;
@@ -811,7 +844,7 @@ routes.get('/:id', async (c) => {
       </EmptyState>
     ));
   }
-  const { visit, routine, recs, reports, team } = bundle;
+  const { visit, routine, recs, reports, comments, team } = bundle;
   const p = perms(c, bundle);
   const user = c.get('user');
   const users = (p.canReassign || p.canReview) ? await activeUsers(c.env.DB) : [];
@@ -1029,6 +1062,32 @@ routes.get('/:id', async (c) => {
               </tbody>
             </table>
           </div>
+        )}
+      </Card>
+
+      <Card title={<>Comments <Badge tone="gray">{comments.length}</Badge></>}>
+        <form method="post" action={`/visits/${visit.id}/comments`} style="display:flex; gap:0.5rem; align-items:flex-start; margin-bottom:1rem">
+          <textarea name="body" rows={2} required placeholder="Add a note…" style="flex:1"></textarea>
+          <button type="submit" class="btn btn--primary" data-busy="Posting…">Post</button>
+        </form>
+        {comments.length === 0 ? <p class="muted">No comments yet.</p> : (
+          <ul class="timeline">
+            {comments.map((cm) => (
+              <li>
+                <div style="display:flex; align-items:center; gap:0.5rem">
+                  <strong>{cm.author_name}</strong>
+                  <span class="muted">{fmtDateTime(cm.created_at)}</span>
+                  {(cm.author_id === user.id || p.isAdmin) && (
+                    <span style="margin-left:auto">
+                      <IconAction action={`/visits/${visit.id}/comments/${cm.id}/delete`} icon="trash" label="Delete comment"
+                        class="btn--ghost" confirm="Delete this comment?" />
+                    </span>
+                  )}
+                </div>
+                <div style="white-space:pre-wrap">{cm.body}</div>
+              </li>
+            ))}
+          </ul>
         )}
       </Card>
 

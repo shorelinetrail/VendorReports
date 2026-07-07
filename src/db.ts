@@ -6,7 +6,7 @@ type Row = Record<string, unknown>;
 /** Tables that carry created_at/updated_at maintained by this layer. */
 const TIMESTAMPED = new Set(['users', 'vendors', 'routines', 'visits', 'tasks', 'recommendations']);
 /** Tables whose mutations are recorded in audit_log. */
-const AUDITED = new Set(['users', 'vendors', 'routines', 'visits', 'tasks', 'recommendations', 'visit_reports', 'system_config']);
+const AUDITED = new Set(['users', 'vendors', 'routines', 'visits', 'tasks', 'recommendations', 'visit_reports', 'visit_comments', 'system_config']);
 
 const bindable = (v: unknown) => (v === true ? 1 : v === false ? 0 : v === undefined ? null : v);
 

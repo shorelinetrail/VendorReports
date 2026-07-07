@@ -2,13 +2,13 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { all, first, updateRow, now } from '../db';
 import { fmtDate, todayStr } from '../dates';
-import { flash } from '../auth';
-import { page, Card, PageHeader, EmptyState, StatCard, taskBadge, isTaskOverdue, Icon, IconAction } from '../ui';
-import { isAdmin, TASK_TYPE_LABELS, type App, type Task, type TaskStatus, type TaskType } from '../types';
+import { activeUsers, flash } from '../auth';
+import { page, Card, PageHeader, EmptyState, StatCard, taskBadge, isTaskOverdue, Icon, IconAction, IconModalBtn, Modal, ModalButtons, Field } from '../ui';
+import { isAdmin, ROLE_LABELS, TASK_TYPE_LABELS, type App, type Task, type TaskStatus, type TaskType, type Visit } from '../types';
 
 const routes = new Hono<App>();
 
-type TaskRow = Task & { plan_number: string; vendor_name: string; assigned_to_name: string };
+type TaskRow = Task & { plan_number: string; vendor_name: string; assigned_to_name: string; vendor_coordinator_id: string };
 
 const FILTERS: { value: string; label: string }[] = [
   { value: 'open', label: 'All open' },
@@ -29,7 +29,7 @@ routes.get('/', async (c) => {
 
   const tasks = await all<TaskRow>(
     db,
-    `SELECT t.*, r.plan_number, ve.name AS vendor_name, u.full_name AS assigned_to_name
+    `SELECT t.*, r.plan_number, ve.name AS vendor_name, u.full_name AS assigned_to_name, v.vendor_coordinator_id
      FROM tasks t
      JOIN visits v ON v.id = t.visit_id
      JOIN routines r ON r.id = v.routine_id
@@ -54,6 +54,12 @@ routes.get('/', async (c) => {
     return t.status === filter;
   });
   const query = (f: string) => `/tasks?status=${f}${showAll ? '&all=1' : ''}`;
+  // Admins and the visit's coordinator can hand an open task to someone else
+  // (holidays, sickness) without reassigning the whole team.
+  const canReassign = (t: TaskRow) =>
+    ['pending', 'in_progress', 'overdue'].includes(t.status) && (isAdmin(user) || user.id === t.vendor_coordinator_id);
+  const reassignable = visible.filter(canReassign);
+  const users = reassignable.length > 0 ? await activeUsers(db) : [];
 
   return page(c, showAll ? 'All Tasks' : 'My Tasks', (
     <>
@@ -113,6 +119,9 @@ routes.get('/', async (c) => {
                         {mine && open && (
                           <IconAction action={`/tasks/${t.id}/complete`} icon="tick" label="Complete task" class="btn--green" />
                         )}
+                        {canReassign(t) && (
+                          <IconModalBtn modal={`reassign-${t.id}`} icon="users" label="Reassign task" />
+                        )}
                       </td>
                     </tr>
                   );
@@ -122,8 +131,45 @@ routes.get('/', async (c) => {
           </div>
         )}
       </Card>
+
+      {reassignable.map((t) => (
+        <Modal id={`reassign-${t.id}`} title={`Reassign: ${TASK_TYPE_LABELS[t.task_type]}`}>
+          <form method="post" action={`/tasks/${t.id}/reassign`}>
+            <div class="context">{t.plan_number} - {t.vendor_name}, due {fmtDate(t.due_date)}</div>
+            <Field label="Assign to">
+              <select name="assigned_to_id" required>
+                {users.map((u) => (
+                  <option value={u.id} selected={u.id === t.assigned_to_id}>{u.full_name} ({ROLE_LABELS[u.role]})</option>
+                ))}
+              </select>
+            </Field>
+            <ModalButtons submit="Reassign" />
+          </form>
+        </Modal>
+      ))}
     </>
   ));
+});
+
+routes.post('/:id/reassign', async (c) => {
+  const user = c.get('user');
+  const form = await c.req.formData();
+  const assignTo = String(form.get('assigned_to_id') ?? '');
+  const task = await first<Task>(c.env.DB, 'SELECT * FROM tasks WHERE id = ?', c.req.param('id'));
+  const visit = task ? await first<Visit>(c.env.DB, 'SELECT * FROM visits WHERE id = ?', task.visit_id) : null;
+  if (!task || !visit || !['pending', 'in_progress', 'overdue'].includes(task.status) ||
+      (!isAdmin(user) && user.id !== visit.vendor_coordinator_id)) {
+    flash(c, 'You cannot reassign this task.', 'err');
+    return c.redirect('/tasks');
+  }
+  const target = await first<{ full_name: string }>(c.env.DB, 'SELECT full_name FROM users WHERE id = ? AND is_active = 1', assignTo);
+  if (!target) {
+    flash(c, 'Pick an active user.', 'err');
+    return c.redirect('/tasks');
+  }
+  await updateRow(c.env.DB, 'tasks', task.id, { assigned_to_id: assignTo }, c.get('realUser').id);
+  flash(c, `Task reassigned to ${target.full_name}.`);
+  return c.redirect('/tasks');
 });
 
 async function transition(c: Context<App, '/:id/start' | '/:id/complete'>, allowed: TaskStatus[], patch: Record<string, unknown>, message: string) {

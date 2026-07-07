@@ -87,11 +87,12 @@ routes.get('/', async (c) => {
       : Promise.resolve([] as CalVisit[]),
   ]);
 
-  // Stalled visits: open visits whose workflow task is past due - the chase-up
-  // view for coordinators/admins (assignees already see their own overdue tasks).
-  let needsAttention: { id: string; status: VisitStatus; plan_number: string; vendor_name: string; task_type: TaskType; due_date: string; assignee_name: string }[] = [];
+  // Stalled visits: open visits with an overdue workflow task or an overdue
+  // recommendation - the chase-up view for coordinators/admins.
+  interface Attention { id: string; status: VisitStatus; plan_number: string; vendor_name: string; what: string; due_date: string; assignee_name: string }
+  let needsAttention: Attention[] = [];
   if (isAdmin(user) || user.role === 'vendor_coordinator') {
-    const rows = await all<(typeof needsAttention)[number]>(
+    const taskRows = await all<Attention & { task_type: TaskType }>(
       db,
       `SELECT v.id, v.status, r.plan_number, ve.name AS vendor_name, t.task_type, t.due_date, u.full_name AS assignee_name
        FROM visits v
@@ -103,8 +104,25 @@ routes.get('/', async (c) => {
        ORDER BY t.due_date`,
       today
     );
+    const recRows = await all<Attention>(
+      db,
+      `SELECT v.id, v.status, r.plan_number, ve.name AS vendor_name, 'Recommendation' AS what, rec.due_date, u.full_name AS assignee_name
+       FROM recommendations rec
+       JOIN visits v ON v.id = rec.visit_id
+       JOIN routines r ON r.id = v.routine_id
+       JOIN vendors ve ON ve.id = r.vendor_id
+       JOIN users u ON u.id = COALESCE(rec.action_assigned_to_id, v.maintenance_engineer_id)
+       WHERE rec.due_date < ? AND rec.status IN ('open', 'in_review', 'approved')
+         AND v.status NOT IN ('completed', 'cancelled')
+       ORDER BY rec.due_date`,
+      today
+    );
+    const merged = [
+      ...taskRows.map((r) => ({ ...r, what: `${TASK_TYPE_LABELS[r.task_type]} task` })),
+      ...recRows,
+    ].sort((a, b) => a.due_date.localeCompare(b.due_date));
     const seen = new Set<string>();
-    needsAttention = rows.filter((r) => !seen.has(r.id) && seen.add(r.id) !== undefined).slice(0, 6);
+    needsAttention = merged.filter((r) => !seen.has(r.id) && seen.add(r.id) !== undefined).slice(0, 6);
   }
 
   const overdueCount = myTasks.filter((t) => isTaskOverdue(t.status, t.due_date)).length;
@@ -139,7 +157,7 @@ routes.get('/', async (c) => {
                   </td>
                   <td>{visitBadge(v.status)}</td>
                   <td class="text-red">
-                    {TASK_TYPE_LABELS[v.task_type]} overdue since {fmtDate(v.due_date)}
+                    {v.what} overdue since {fmtDate(v.due_date)}
                     <div class="muted">Waiting on {v.assignee_name}</div>
                   </td>
                 </tr>

@@ -125,6 +125,14 @@ export interface Recommendation {
   updated_at: string;
 }
 
+export interface VisitComment {
+  id: string;
+  visit_id: string;
+  author_id: string;
+  body: string;
+  created_at: string;
+}
+
 export interface VisitReport {
   id: string;
   visit_id: string;
