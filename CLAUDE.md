@@ -4,32 +4,35 @@ Guidance for Claude Code when working in this repository.
 
 ## What this is
 
-VendorTrak: a vendor maintenance tracker on **Cloudflare Workers** (Hono +
-server-rendered JSX), **D1/SQLite**, **R2** for report files, one daily cron.
-Runs fully locally via wrangler (D1 = a real SQLite file, R2 emulated). It was
-rebuilt from a Next.js/Supabase app in 2026-07 and then heavily iterated with
-the user — `REBUILD_NOTES.md` records the history; work happens on the
+VendorTrak: a vendor maintenance tracker on **Node.js** (Hono +
+server-rendered JSX via tsx), **PostgreSQL**, report files on **local disk**,
+one daily in-process job. It was rebuilt from a Next.js/Supabase app onto
+Cloudflare Workers in 2026-07, then ported off Workers to Node + PostgreSQL
+(2026-07-08) — `REBUILD_NOTES.md` records the history; work happens on the
 `fable-version` branch (never touch the old default branch).
 
 ## Commands
 
 ```bash
-npm run dev                # wrangler dev at http://localhost:8787 (user runs it on --port 8788)
-npm run typecheck          # tsc --noEmit - the fastest full check; there is no test suite
-npm run db:migrate         # apply migrations/ to the local SQLite db (.wrangler/state)
-npm run db:migrate:remote  # apply to the real D1 database (not yet created - wrangler.jsonc has a placeholder id)
-npm run deploy             # wrangler deploy
+npm run dev            # node --watch + tsx at http://localhost:8788 (restarts on TS/JSX changes)
+npm run start          # same server without the watcher
+npm run typecheck      # tsc --noEmit - the fastest full check; there is no test suite
+npm run db:migrate     # create the database if needed + apply migrations/ (tracked in schema_migrations)
 ```
 
-Run wrangler/tsc from the repo root (`C:\Claude\VendorTrak\VendorTrak`) — the
-shell often resets cwd to the parent folder, where `npx tsc` resolves to a
-bogus npm package.
+Config via env vars, all defaulted for local dev (`src/env.ts`):
+`DATABASE_URL` (postgres://postgres:postgres@localhost:5432/vendortrak),
+`PORT` (8788), `FILES_DIR` (data/reports).
 
 ## Local dev environment (state you inherit)
 
-- The user usually has `npx wrangler dev --port 8788` running; TS/JSX changes
-  hot-reload, CSS/JS in `public/` need a hard refresh in their browser.
-- Local DB test accounts (local dev database only, seeded during testing):
+- PostgreSQL 17 runs as the Windows service `postgresql-x64-17`; superuser
+  `postgres`/`postgres` on localhost:5432. `psql` is at
+  `C:\Program Files\PostgreSQL\17\bin\psql.exe` (not on PATH).
+- The user usually has `npm run dev` running on port 8788; TS/JSX changes
+  restart the server automatically, CSS/JS in `public/` need a hard refresh
+  in their browser.
+- Local DB test accounts (local dev database only):
   `admin@example.com`/`admin-pass-123` (admin), and `cora@` (coordinator),
   `max@` (maintenance engineer), `tia@` (technical engineer) all
   `@example.com`/`password123`. The user also creates their own data — treat
@@ -39,22 +42,32 @@ bogus npm package.
   grep the returned HTML. All HTML renders as ONE line — use `grep -o | wc -l`
   for counting, never `grep -c`. When extracting uuids after a prefix, strip
   the prefix with sed; `grep -oE '[0-9a-f-]{36}'` on a hex-ish prefix like
-  "replace-report-" matches a shifted window.
-- Ad-hoc SQL: `npx wrangler d1 execute vendortrak --local --command "..."`
-  (safe while dev server runs). Complex LIKE patterns through PowerShell can
-  fail - prefer `--file`.
+  "replace-report-" matches a shifted window. In Git Bash, curl `-F file=@...`
+  needs a Windows-style path (`cygpath -m`), not /c/... .
+- Ad-hoc SQL: `psql -U postgres -h localhost -d vendortrak -t -A -c "..."`
+  with `PGPASSWORD=postgres` (safe while the dev server runs). Uploaded
+  report files live under `data/reports/<visit_id>/` (gitignored).
 
 ## Architecture
 
-- `src/index.tsx` — mounts routes; everything after `requireAuth` needs a
-  session; `/account/password`, impersonation endpoints; `scheduled()` cron
-  (generateVisits + expireTasks + sweepCloseTasks daily 06:00 UTC).
-- `src/db.ts` — **always mutate through `insertRow`/`updateRow`/`deleteRow`**:
+- `src/server.ts` — Node entry point: pg Pool + disk bucket wired into Hono's
+  env, static files from `public/`, and the daily job (generateVisits +
+  expireTasks + sweepCloseTasks) run at startup and then once per UTC day.
+- `src/index.tsx` — the Hono app: mounts routes; everything after
+  `requireAuth` needs a session; `/account/password`, impersonation endpoints.
+- `src/db.ts` — the `Db` class wraps a pg Pool and rewrites D1/SQLite-style
+  `?`/`?N` placeholders to `$n` (string literals skipped), so queries keep the
+  old style. **Always mutate through `insertRow`/`updateRow`/`deleteRow`**:
   they maintain `updated_at` and write the append-only `audit_log` (actor =
   the REAL user). Raw `run()` only for reads and non-audited tables.
-- `src/auth.ts` — PBKDF2 + DB-backed session cookies, `requireAuth`,
-  `requireRole` (checks the REAL user; 'admin' in the list also accepts any
-  user with the `is_admin` flag), CSRF origin check, `flash()`/`takeFlash()`.
+  int8/numeric results are parsed to JS numbers.
+- `src/storage.ts` — `Bucket`: report files on disk with the R2-shaped
+  put/get/delete API the routes already used.
+- `src/env.ts` — DATABASE_URL / PORT / FILES_DIR with local-dev defaults.
+- `src/auth.ts` — PBKDF2 + DB-backed session cookies (WebCrypto, native in
+  Node), `requireAuth`, `requireRole` (checks the REAL user; 'admin' in the
+  list also accepts any user with the `is_admin` flag), CSRF origin check,
+  `flash()`/`takeFlash()`.
 - `src/types.ts` — hand-maintained interfaces + `isAdmin()` (role==='admin'
   OR is_admin flag) — the ONLY way to check admin powers.
 - `src/workflow.ts` — the domain core: `generateVisits`, `expireTasks`,
@@ -76,6 +89,9 @@ bogus npm package.
   `data-confirm`, `data-autosubmit`, `data-show-when` conditional fields,
   row-click nav via `tr[data-href]`/`tr[data-row-modal]`, click-to-expand
   `.desc-clip`). Everything works without JS.
+- `scripts/migrate.ts` — creates the database if missing, applies pending
+  `migrations/*.sql` in order, each in a transaction, recorded in
+  `schema_migrations`.
 
 ## The workflow (learned through user iteration - preserve these rules)
 
@@ -124,10 +140,16 @@ state; reschedule resets to scheduled.
 
 - Effective vs real user: `c.get('user')` acts, `c.get('realUser')` audits
   and gates non-spoofable authority.
-- Dates `'YYYY-MM-DD'` strings, timestamps ISO-8601 UTC, booleans 0/1.
-  String comparison IS date comparison. Helpers in `src/dates.ts`.
+- Dates `'YYYY-MM-DD'` strings, timestamps ISO-8601 UTC, booleans 0/1 —
+  columns are TEXT/INTEGER on purpose (semantics carried over from SQLite;
+  string comparison IS date comparison). Helpers in `src/dates.ts`.
+- SQL keeps `?` placeholders (`src/db.ts` rewrites them). Postgres dialect
+  notes: use ILIKE for case-insensitive search; email uniqueness is a
+  `lower(email)` unique index (lookups use `lower(email) = lower(?)`);
+  duplicate-key errors are matched case-insensitively on 'unique'.
 - Schema changes: new numbered file in `migrations/` + update `src/types.ts`.
-  Currently 0001–0009; 0002+ have never been applied remotely.
+  The current schema is one consolidated file (0001) — the SQLite-era 0001–0009
+  are in git history.
 - Action endpoints: parse form → `withVisit(check, action)` (loads bundle,
   perms-checks, flashes, redirects to the referer or an action-supplied
   `{message, redirect}`) → mutate via audited helpers.

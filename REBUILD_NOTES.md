@@ -1,5 +1,11 @@
 # VendorTrak Rebuild Notes (`fable-version` branch)
 
+> **Current stack note (2026-07-08):** the app has since been ported off
+> Cloudflare Workers to **Node.js + PostgreSQL** — see the
+> [PostgreSQL port](#postgresql-port-2026-07-08) section at the end. The
+> sections below record the Workers-era rebuild as history; "How to run"
+> instructions in them are superseded by the README.
+
 A ground-up rebuild of the vendor maintenance tracker. **Every workflow the old
 app supported still works**; the implementation underneath is completely
 different, per the added requirement that the app **run fully locally on SQLite
@@ -277,3 +283,50 @@ Workflow refinements added after hands-on review of the finished rebuild:
 - No automated Postgres → SQLite data migration (see above).
 - Sessions last 30 days; deactivating a user blocks them at the next request
   (sessions are checked against `is_active` on every request).
+
+## PostgreSQL port (2026-07-08)
+
+The Cloudflare deploy path was never used (no remote D1/R2 were created), and
+the direction changed to self-hosting - so the app was ported off Workers to
+a plain **Node.js server with a local PostgreSQL database**. No workflow or
+UI behaviour changed; the port swaps infrastructure only.
+
+| | Workers era | Now |
+|---|---|---|
+| Runtime | Cloudflare Workers (wrangler dev locally) | Node.js + @hono/node-server, run with tsx |
+| Database | D1 (SQLite) | PostgreSQL 17 (`pg` driver) |
+| File storage | R2 bucket | Local disk under `data/reports/` (`src/storage.ts`) |
+| Cron | Workers cron trigger | In-process daily job in `src/server.ts` (runs at startup + once per UTC day) |
+| Static assets | wrangler `assets` config | `serveStatic` middleware |
+| Migrations | `wrangler d1 migrations apply` | `scripts/migrate.ts` (creates the DB, tracks `schema_migrations`) |
+
+Implementation notes:
+
+- **Queries did not change.** `src/db.ts` wraps a pg Pool in a `Db` class that
+  rewrites D1-style `?`/`?N` placeholders to `$n`; `all`/`first`/`run` and the
+  audited `insertRow`/`updateRow`/`deleteRow` keep their signatures, so every
+  route works untouched. int8/numeric results are parsed to numbers.
+- **Schema conventions preserved**: TEXT uuids/dates/timestamps, INTEGER 0/1
+  booleans - so all app-side date/boolean logic is identical. The nine SQLite
+  migrations were consolidated into one Postgres `0001_init.sql` (originals in
+  git history). `schema_migrations` replaces wrangler's d1_migrations.
+- Dialect fixes (the only SQL edits): `COLLATE NOCASE` on users.email became a
+  `lower(email)` unique index + `lower() = lower(?)` lookup; the two search
+  queries use ILIKE (SQLite LIKE was case-insensitive); duplicate-key error
+  sniffing matches 'unique' case-insensitively (Postgres says "duplicate key
+  value violates unique constraint"); audit_log id is an identity column.
+- The R2 subset the routes used (`put`/`get`/`delete`, streamed bodies) is
+  reimplemented on disk with key = path (traversal-checked), so upload,
+  download, view-in-browser, replace and delete behave exactly as before.
+- The daily job now also runs at server startup - a locally hosted server is
+  rarely awake at exactly 06:00 UTC, and all three jobs are idempotent.
+- Auth is untouched: the WebCrypto APIs used for PBKDF2/SHA-256 are native in
+  Node 20+.
+- Config via env vars with local-dev defaults (`src/env.ts`): `DATABASE_URL`,
+  `PORT` (default 8788), `FILES_DIR`.
+
+Verified with a scripted 47-check end-to-end pass (curl + psql): setup →
+users → vendor → routine → generate visits → confirm → upload/download
+(byte-identical) → recommendation → technical review → close; plus
+case-insensitive search, all pages 200, audit actors recorded, 403 for
+non-admins and cross-origin POSTs rejected.
