@@ -83,16 +83,16 @@ export async function generateVisits(db: Db): Promise<{ created: string[]; error
         }, null);
         created.push(`${routine.plan_number} - ${date}`);
 
+        // Confirm task for every new visit; a visit already inside the
+        // confirmation window is due immediately rather than never tasked.
         const due = addDays(date, -cfg.visit_confirmation_days);
-        if (due > today) {
-          await insertRow(db, 'tasks', {
-            visit_id: visit.id,
-            task_type: 'confirm_visit_date',
-            assigned_to_id: routine.vendor_coordinator_id,
-            status: 'pending',
-            due_date: due,
-          }, null);
-        }
+        await insertRow(db, 'tasks', {
+          visit_id: visit.id,
+          task_type: 'confirm_visit_date',
+          assigned_to_id: routine.vendor_coordinator_id,
+          status: 'pending',
+          due_date: due > today ? due : today,
+        }, null);
       } catch (err) {
         errors.push(`${routine.plan_number} (${date}): ${err instanceof Error ? err.message : err}`);
       }
@@ -116,7 +116,7 @@ export async function sweepCloseTasks(db: Db): Promise<void> {
 /** Flips past-due pending/in-progress tasks to 'overdue'. Returns how many changed. */
 export async function expireTasks(db: Db): Promise<number> {
   const due = await all<{ id: string }>(
-    db, "SELECT id FROM tasks WHERE due_date < ? AND status IN ('pending', 'in_progress')", todayStr());
+    db, "SELECT id FROM tasks WHERE due_date < ? AND status = 'pending'", todayStr());
   for (const t of due) await updateRow(db, 'tasks', t.id, { status: 'overdue' }, null);
   return due.length;
 }
@@ -138,7 +138,7 @@ export async function createTask(
   }, actorId);
 }
 
-const OPEN_TASK_STATUSES = "('pending', 'in_progress', 'overdue')";
+const OPEN_TASK_STATUSES = "('pending', 'overdue')";
 
 /** Creates a task unless one of the same type is already open on the visit. */
 export async function createTaskOnce(
@@ -200,7 +200,6 @@ export interface VisitPerms {
   isTechEngineer: boolean;
   isOpen: boolean;
   hasReports: boolean;
-  allRecsDone: boolean;
   pendingRecsCheck: boolean;
   canConfirmDate: boolean;
   canUploadReport: boolean;
@@ -224,11 +223,10 @@ export function visitPerms(user: User, visit: Visit, reportCount: number, recs: 
   // judgement (add recommendations or confirm none) - the visit isn't ready
   // to close until that's answered.
   const pendingRecsCheck = tasks.some((t) =>
-    t.task_type === 'create_recommendations' && ['pending', 'in_progress', 'overdue'].includes(t.status));
-  const allRecsDone = recs.length > 0 && recs.every((r) => r.status === 'completed' || r.status === 'cancelled');
+    t.task_type === 'create_recommendations' && ['pending', 'overdue'].includes(t.status));
 
   return {
-    isAdmin, isCoordinator, isMaintEngineer, isTechEngineer, isOpen, hasReports, allRecsDone,
+    isAdmin, isCoordinator, isMaintEngineer, isTechEngineer, isOpen, hasReports,
     canConfirmDate: (isCoordinator || isAdmin) && visit.status === 'scheduled',
     // Reports/attachments can be added at any point in the visit's life
     // (including after completion - a late report prompts a recommendations

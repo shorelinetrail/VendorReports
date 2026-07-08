@@ -107,7 +107,6 @@ export function taskBadge(status: TaskStatus, dueDate: string) {
   const today = todayStr();
   if (status === 'overdue' || dueDate < today) return <Badge tone="red">Overdue</Badge>;
   if (dueDate === today) return <Badge tone="amber">Due Today</Badge>;
-  if (status === 'in_progress') return <Badge tone="blue">In Progress</Badge>;
   return <Badge tone="gray">Pending</Badge>;
 }
 
@@ -215,7 +214,7 @@ async function getNotifications(c: Context<App>): Promise<Notification[]> {
     c.env.DB,
     `SELECT t.id, t.task_type, t.due_date, t.status, t.visit_id, COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number
      FROM tasks t JOIN visits v ON v.id = t.visit_id LEFT JOIN routines r ON r.id = v.routine_id
-     WHERE t.assigned_to_id = ? AND t.status IN ('pending', 'in_progress', 'overdue')
+     WHERE t.assigned_to_id = ? AND t.status IN ('pending', 'overdue')
      ORDER BY t.due_date LIMIT 5`,
     user.id
   );

@@ -40,13 +40,13 @@ routes.get('/', async (c) => {
 
   const overdue = (t: TaskRow) => isTaskOverdue(t.status, t.due_date);
   const counts = {
-    pending: tasks.filter((t) => ['pending', 'in_progress'].includes(t.status) && !overdue(t)).length,
+    pending: tasks.filter((t) => t.status === 'pending' && !overdue(t)).length,
     overdue: tasks.filter(overdue).length,
     completed: tasks.filter((t) => t.status === 'completed').length,
   };
   const visible = tasks.filter((t) => {
     if (filter === 'all') return true;
-    if (filter === 'open') return ['pending', 'in_progress', 'overdue'].includes(t.status);
+    if (filter === 'open') return ['pending', 'overdue'].includes(t.status);
     if (filter === 'overdue') return overdue(t);
     return t.status === filter;
   });
@@ -54,7 +54,7 @@ routes.get('/', async (c) => {
   // Admins and the visit's coordinator can hand an open task to someone else
   // (holidays, sickness) without reassigning the whole team.
   const canReassign = (t: TaskRow) =>
-    ['pending', 'in_progress', 'overdue'].includes(t.status) && (isAdmin(user) || user.id === t.vendor_coordinator_id);
+    ['pending', 'overdue'].includes(t.status) && (isAdmin(user) || user.id === t.vendor_coordinator_id);
   const reassignable = visible.filter(canReassign);
   const users = reassignable.length > 0 ? await activeUsers(db) : [];
 
@@ -145,7 +145,7 @@ routes.post('/:id/reassign', async (c) => {
   const assignTo = String(form.get('assigned_to_id') ?? '');
   const task = await first<Task>(c.env.DB, 'SELECT * FROM tasks WHERE id = ?', c.req.param('id'));
   const visit = task ? await first<Visit>(c.env.DB, 'SELECT * FROM visits WHERE id = ?', task.visit_id) : null;
-  if (!task || !visit || !['pending', 'in_progress', 'overdue'].includes(task.status) ||
+  if (!task || !visit || !['pending', 'overdue'].includes(task.status) ||
       (!isAdmin(user) && user.id !== visit.vendor_coordinator_id)) {
     flash(c, 'You cannot reassign this task.', 'err');
     return c.redirect('/tasks');

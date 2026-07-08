@@ -49,7 +49,7 @@ routes.get('/', async (c) => {
       `SELECT
          (SELECT COUNT(*) FROM routines WHERE is_active = 1) AS routines,
          (SELECT COUNT(*) FROM visits WHERE status NOT IN ('completed', 'cancelled')) AS visits,
-         (SELECT COUNT(*) FROM recommendations WHERE status = 'open') AS open_recs,
+         (SELECT COUNT(*) FROM recommendations WHERE status IN ('open', 'in_review', 'approved')) AS open_recs,
          (SELECT COUNT(*) FROM visits WHERE status = 'completed' AND completed_at >= ?) AS completed_month`,
       monthStart()
     ),
@@ -57,7 +57,7 @@ routes.get('/', async (c) => {
       db,
       `SELECT t.id, t.task_type, t.due_date, t.status, t.visit_id, COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number, ve.name AS vendor_name
        FROM tasks t JOIN visits v ON v.id = t.visit_id LEFT JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = COALESCE(r.vendor_id, v.vendor_id)
-       WHERE t.assigned_to_id = ? AND t.status IN ('pending', 'in_progress', 'overdue')
+       WHERE t.assigned_to_id = ? AND t.status IN ('pending', 'overdue')
        ORDER BY t.due_date`,
       user.id
     ),
@@ -98,7 +98,7 @@ routes.get('/', async (c) => {
        FROM visits v
        LEFT JOIN routines r ON r.id = v.routine_id
        JOIN vendors ve ON ve.id = COALESCE(r.vendor_id, v.vendor_id)
-       JOIN tasks t ON t.visit_id = v.id AND t.status IN ('pending', 'in_progress', 'overdue') AND t.due_date < ?
+       JOIN tasks t ON t.visit_id = v.id AND t.status IN ('pending', 'overdue') AND t.due_date < ?
        JOIN users u ON u.id = t.assigned_to_id
        WHERE v.status NOT IN ('completed', 'cancelled')
        ORDER BY t.due_date`,
@@ -147,7 +147,7 @@ routes.get('/', async (c) => {
         <StatCard label="Active Visits" value={counts?.visits ?? 0} href="/visits" icon="clipboard" tone="green" />
         <StatCard label="My Pending Tasks" value={myTasks.length} href="/tasks" icon="tasks" tone="amber" />
         <StatCard label="My Overdue Tasks" value={overdueCount} href="/tasks?status=overdue" icon="alert" tone="red" />
-        <StatCard label="Open Recommendations" value={counts?.open_recs ?? 0} href="/recommendations" icon="file" tone="purple" />
+        <StatCard label="Active Recommendations" value={counts?.open_recs ?? 0} href="/recommendations" icon="file" tone="purple" />
         <StatCard label="Completed This Month" value={counts?.completed_month ?? 0} href="/visits?status=completed" icon="trend" tone="gray" />
       </div>
 

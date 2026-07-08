@@ -227,9 +227,8 @@ routes.post('/adhoc', async (c) => {
   }, c.get('realUser').id);
   const cfg = await getConfig(c.env.DB);
   const due = addDays(date, -cfg.visit_confirmation_days);
-  if (due > todayStr()) {
-    await createTask(c.env.DB, visit.id, 'confirm_visit_date', visit.vendor_coordinator_id, due, c.get('realUser').id);
-  }
+  await createTask(c.env.DB, visit.id, 'confirm_visit_date', visit.vendor_coordinator_id,
+    due > todayStr() ? due : todayStr(), c.get('realUser').id);
   flash(c, `Ad-hoc visit ${visit.notification_number} created for ${vendor.name}.`);
   return c.redirect(`/visits/${visit.id}`);
 });
@@ -257,10 +256,17 @@ routes.post('/', async (c) => {
       maintenance_engineer_id: routine.maintenance_engineer_id,
       technical_engineer_id: routine.technical_engineer_id,
     }, c.get('realUser').id);
+    const cfg = await getConfig(c.env.DB);
+    const due = addDays(date, -cfg.visit_confirmation_days);
+    await createTask(c.env.DB, visit.id, 'confirm_visit_date', routine.vendor_coordinator_id,
+      due > todayStr() ? due : todayStr(), c.get('realUser').id);
     flash(c, `Visit created for ${routine.plan_number} on ${fmtDate(date)}.`);
     return c.redirect(`/visits/${visit.id}`);
-  } catch {
-    flash(c, `A visit for ${routine.plan_number} on ${fmtDate(date)} already exists.`, 'err');
+  } catch (err) {
+    const duplicate = err instanceof Error && err.message.toLowerCase().includes('unique');
+    flash(c, duplicate
+      ? `A visit for ${routine.plan_number} on ${fmtDate(date)} already exists.`
+      : `Could not create the visit: ${err instanceof Error ? err.message : 'unknown error'}`, 'err');
     return c.redirect('/visits');
   }
 });
@@ -426,7 +432,13 @@ async function storeReport(
     content_type: file.type || null, uploaded_by_id: c.get('user').id, uploaded_at: now(),
     notes: notes || null, replaces_id: replacesId,
   }, actor(c));
-  if (b.visit.status === 'date_confirmed') {
+  // A report arriving before the date was confirmed still moves the visit
+  // forward (the work evidently happened) - the stepper shows the skipped
+  // confirmation honestly. Same rule as the no-report path.
+  if (b.visit.status === 'scheduled' || b.visit.status === 'date_confirmed') {
+    if (b.visit.status === 'scheduled') {
+      await cancelOpenTasks(c.env.DB, b.visit.id, 'confirm_visit_date', actor(c));
+    }
     await updateRow(c.env.DB, 'visits', b.visit.id, { status: 'report_uploaded' satisfies VisitStatus }, actor(c));
     await completeOpenTasks(c.env.DB, b.visit.id, 'upload_report', actor(c));
     const cfg = await getConfig(c.env.DB);
@@ -467,7 +479,8 @@ routes.post('/:id/recommendations-check', async (c) => {
     c,
     (b) => {
       const p = perms(c, b);
-      return p.isMaintEngineer || p.isAdmin;
+      // Same gate as the UI: there must actually be an open recs check.
+      return (p.isMaintEngineer || p.isAdmin) && p.pendingRecsCheck && p.isOpen;
     },
     async (b) => {
       if (!reason) throw new Error('A reason is required when confirming no recommendations are needed.');
@@ -494,7 +507,9 @@ routes.post('/:id/more-recommendations', async (c) => {
     c,
     (b) => {
       const p = perms(c, b);
-      return p.isCoordinator || p.isMaintEngineer || p.isAdmin;
+      // Runs on open AND completed visits (a late report can rewind a closed
+      // one) but never on cancelled - that would seed a task on a dead visit.
+      return (p.isCoordinator || p.isMaintEngineer || p.isAdmin) && b.visit.status !== 'cancelled';
     },
     async (b) => {
       const db = c.env.DB;
@@ -541,8 +556,13 @@ routes.post('/:id/reports/:reportId/delete', async (c) => {
     if (!report) throw new Error('Report not found.');
     await c.env.REPORTS.delete(report.file_key);
     await deleteRow(c.env.DB, 'visit_reports', report.id, actor(c));
-    if (b.reports.length === 1 && b.visit.status === 'report_uploaded') {
-      await updateRow(c.env.DB, 'visits', b.visit.id, { status: 'date_confirmed' satisfies VisitStatus }, actor(c));
+    // Deleting the last report rewinds the stage - unless a no-report reason
+    // still stands in for one. A visit whose date was never confirmed goes
+    // back to scheduled, not to a confirmation it never had.
+    if (b.reports.length === 1 && b.visit.status === 'report_uploaded' && !b.visit.no_report_reason) {
+      await updateRow(c.env.DB, 'visits', b.visit.id, {
+        status: (b.visit.confirmed_date ? 'date_confirmed' : 'scheduled') satisfies VisitStatus,
+      }, actor(c));
     }
     return `Report "${report.file_name}" deleted.`;
   });
@@ -551,8 +571,15 @@ routes.post('/:id/reports/:reportId/delete', async (c) => {
 routes.post('/:id/no-report', async (c) => {
   const form = await c.req.formData();
   const reason = String(form.get('reason') ?? '').trim();
-  return withVisit(c, (b) => perms(c, b).canUploadReport, async (b) => {
+  return withVisit(
+    c,
+    (b) => perms(c, b).canUploadReport &&
+      ['scheduled', 'date_confirmed'].includes(b.visit.status) && !b.visit.no_report_reason,
+    async (b) => {
     if (!reason) throw new Error('A reason is required.');
+    if (b.visit.status === 'scheduled') {
+      await cancelOpenTasks(c.env.DB, b.visit.id, 'confirm_visit_date', actor(c));
+    }
     await updateRow(c.env.DB, 'visits', b.visit.id, {
       no_report_reason: reason, status: 'report_uploaded' satisfies VisitStatus,
     }, actor(c));
@@ -602,7 +629,8 @@ routes.post('/:id/recommendations/:recId/send-review', async (c) => {
     c,
     (b) => {
       const p = perms(c, b);
-      return p.isMaintEngineer || p.isAdmin;
+      // Only visits whose plan requires technical review have a review step.
+      return (p.isMaintEngineer || p.isAdmin) && !!b.meta.requires_technical_review;
     },
     async (b) => {
       const rec = b.recs.find((r) => r.id === c.req.param('recId'));
@@ -753,6 +781,8 @@ routes.post('/:id/recommendations/:recId/sap', async (c) => {
     async (b) => {
       const rec = b.recs.find((r) => r.id === c.req.param('recId'));
       if (!rec) throw new Error('Recommendation not found.');
+      // Same rule as editing: resolved recommendations are immutable.
+      if (!['open', 'approved'].includes(rec.status)) throw new Error('Completed or cancelled recommendations cannot be changed.');
       if (!sap || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) throw new Error('SAP notification number and due date are both required.');
       await updateRow(c.env.DB, 'recommendations', rec.id, { sap_notification_number: sap, due_date: dueDate }, actor(c));
       return 'SAP details saved.';
@@ -814,7 +844,7 @@ routes.post('/:id/close', async (c) => {
     await completeOpenTasks(db, b.visit.id, 'close_visit', actor(c));
     // A completed visit should have no open tasks left - sweep any stragglers.
     for (const t of b.tasks) {
-      if (t.task_type !== 'close_visit' && ['pending', 'in_progress', 'overdue'].includes(t.status)) {
+      if (t.task_type !== 'close_visit' && ['pending', 'overdue'].includes(t.status)) {
         await updateRow(db, 'tasks', t.id, { status: 'cancelled' }, actor(c));
       }
     }
@@ -832,7 +862,7 @@ routes.post('/:id/cancel', async (c) => {
       status: 'cancelled' satisfies VisitStatus, cancelled_at: now(), cancellation_reason: reason,
     }, actor(c));
     for (const t of b.tasks) {
-      if (['pending', 'in_progress', 'overdue'].includes(t.status)) {
+      if (['pending', 'overdue'].includes(t.status)) {
         await updateRow(db, 'tasks', t.id, { status: 'cancelled' }, actor(c));
       }
     }
@@ -917,14 +947,17 @@ routes.post('/:id/reschedule', async (c) => {
     const db = c.env.DB;
     const oldDate = b.visit.scheduled_date;
     await updateRow(db, 'visits', b.visit.id, {
-      scheduled_date: newDate, confirmed_date: null, confirmed_at: null,
+      scheduled_date: newDate, end_date: null, confirmed_date: null, confirmed_at: null,
       status: 'scheduled' satisfies VisitStatus,
       reschedule_reason: reason, rescheduled_at: now(), rescheduled_from: oldDate,
     }, actor(c));
-    // The workflow restarts at confirmation - drop the later-step tasks too.
-    await cancelOpenTasks(db, b.visit.id, 'confirm_visit_date', actor(c));
-    await cancelOpenTasks(db, b.visit.id, 'upload_report', actor(c));
-    await cancelOpenTasks(db, b.visit.id, 'create_recommendations', actor(c));
+    // The workflow restarts at confirmation - drop ALL open tasks (a visit
+    // rescheduled from deep in the flow may carry review/respond/close tasks).
+    for (const t of b.tasks) {
+      if (['pending', 'overdue'].includes(t.status)) {
+        await updateRow(db, 'tasks', t.id, { status: 'cancelled' }, actor(c));
+      }
+    }
     const cfg = await getConfig(db);
     await createTask(db, b.visit.id, 'confirm_visit_date', b.visit.vendor_coordinator_id,
       addDays(newDate, -cfg.visit_confirmation_days), actor(c),
@@ -947,14 +980,16 @@ routes.post('/:id/reassign', async (c) => {
       technical_engineer_id: techEngineerId,
     }, actor(c));
     // Move open tasks with the team so nothing stays assigned to the old people.
+    // review_recommendations (respond) tasks are deliberately NOT moved: they
+    // belong to the recommendation's action assignee, who is not changed here.
     const taskOwner: Record<string, string> = {
       confirm_visit_date: coordinatorId, upload_report: coordinatorId,
       create_recommendations: maintEngineerId, close_visit: maintEngineerId,
-      technical_review: techEngineerId, review_recommendations: techEngineerId,
+      technical_review: techEngineerId,
     };
     for (const t of b.tasks) {
       const newOwner = taskOwner[t.task_type];
-      if (newOwner && newOwner !== t.assigned_to_id && ['pending', 'in_progress', 'overdue'].includes(t.status)) {
+      if (newOwner && newOwner !== t.assigned_to_id && ['pending', 'overdue'].includes(t.status)) {
         await updateRow(db, 'tasks', t.id, { assigned_to_id: newOwner }, actor(c));
       }
     }
@@ -1103,12 +1138,18 @@ routes.get('/:id', async (c) => {
       ) : (
         <Card>
           <div class="stepper">
-            {STEPS.map((s, i) => (
-              <div class={`step ${i < currentStep ? 'step--done' : i === currentStep ? 'step--current' : ''}`}>
-                <div class="step__dot">{i < currentStep ? '✓' : i + 1}</div>
-                <div class="step__label">{s.label}</div>
-              </div>
-            ))}
+            {STEPS.map((s, i) => {
+              // Honest stepper: a stage the visit passed without actually doing
+              // (report arrived before the date was confirmed) shows as skipped.
+              const skipped = i < currentStep && s.status === 'date_confirmed' && !visit.confirmed_date;
+              return (
+                <div class={`step ${skipped ? 'step--skipped' : i < currentStep ? 'step--done' : i === currentStep ? 'step--current' : ''}`}
+                  title={skipped ? 'Skipped - the report arrived before the date was confirmed' : undefined}>
+                  <div class="step__dot">{skipped ? '–' : i < currentStep ? '✓' : i + 1}</div>
+                  <div class="step__label">{skipped ? `${s.label} (skipped)` : s.label}</div>
+                </div>
+              );
+            })}
           </div>
           {p.canClose ? (
             <div class="waiting waiting--ready">
@@ -1138,7 +1179,7 @@ routes.get('/:id', async (c) => {
           <div class="btn-row">
             {p.canConfirmDate && <button class="btn btn--primary" data-modal="confirm-date"><Icon name="check" size={16} /> Confirm Visit Date</button>}
             {p.canUploadReport && <button class="btn btn--primary" data-modal="upload-report"><Icon name="upload" size={16} /> Upload Report</button>}
-            {p.canUploadReport && visit.status === 'date_confirmed' && !visit.no_report_reason && (
+            {p.canUploadReport && ['scheduled', 'date_confirmed'].includes(visit.status) && !visit.no_report_reason && (
               <button class="btn" data-modal="no-report">No Report Available</button>
             )}
             {p.canCreateRec && <button class="btn btn--primary" data-modal="add-rec"><Icon name="plus" size={16} /> Add Recommendation</button>}
@@ -1250,7 +1291,7 @@ routes.get('/:id', async (c) => {
                       )}
                       {rec.technical_review_response && <div class="muted">“{rec.technical_review_response}”</div>}
                       {awaitingResponse(rec) && <div class="text-red" style="font-size:0.83rem">Awaiting response from {rec.action_assigned_name ?? 'the assignee'}</div>}
-                      {rec.action_response && <div class="muted">Response{rec.action_assigned_name ? ` from ${rec.action_assigned_name}` : ''}: {rec.action_response}</div>}
+                      {rec.action_response && <div class="muted">Response{rec.action_assigned_name ? ` from ${rec.action_assigned_name}` : ''}{rec.action_responded_at ? ` on ${fmtDateTime(rec.action_responded_at)}` : ''}: {rec.action_response}</div>}
                       {rec.cancellation_reason && <div class="muted">Cancelled: {rec.cancellation_reason}</div>}
                     </td>
                     <td>{rec.sap_notification_number ?? '-'}</td>

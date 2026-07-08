@@ -53,8 +53,10 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
     if (filter === 'active') return ['open', 'in_review', 'approved'].includes(r.status);
     return r.status === filter;
   });
-  const canReview = isAdmin(user) || user.role === 'technical_engineer';
-  const reviewable = visible.filter((r) => r.status === 'in_review' && canReview);
+  // Reviewing is assignment-based (the visit's TE or an admin), matching the
+  // server check - a role-wide button would fail for unassigned engineers.
+  const canReview = (r: RecRow) => isAdmin(user) || user.id === r.technical_engineer_id;
+  const reviewable = visible.filter((r) => r.status === 'in_review' && canReview(r));
   const users = reviewable.length > 0 ? await activeUsers(c.env.DB) : [];
   // Complete/cancel belong to the visit's maintenance engineer (or an admin);
   // reviewing is the technical engineer's only recommendation action.
@@ -115,7 +117,7 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
                     <td class="actions">
                       <a class="btn btn--sm btn--icon" href={`/visits/${r.visit_id}`} title="Open visit" aria-label="Open visit"><Icon name="eye" size={15} /></a>
                       {canEdit(r) && <IconModalBtn modal={`edit-${r.id}`} icon="edit" label="Edit recommendation" />}
-                      {r.status === 'in_review' && canReview && (
+                      {r.status === 'in_review' && canReview(r) && (
                         <IconModalBtn modal={`review-${r.id}`} icon="tasks" label="Submit review" class="btn--primary" />
                       )}
                       {['open', 'approved'].includes(r.status) && canAct(r) && (

@@ -20,7 +20,7 @@ export type TaskType =
   | 'technical_review'
   | 'close_visit';
 
-export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'overdue' | 'cancelled';
+export type TaskStatus = 'pending' | 'completed' | 'overdue' | 'cancelled';
 export type RecommendationStatus = 'open' | 'in_review' | 'approved' | 'completed' | 'cancelled';
 export type ReviewDecision = 'no_action' | 'request_sap' | 'other_action';
 
