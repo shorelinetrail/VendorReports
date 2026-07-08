@@ -361,7 +361,12 @@ routes.post('/:id/more-recommendations', async (c) => {
       const cfg = await getConfig(db);
       await createTaskOnce(db, b.visit.id, 'create_recommendations', b.visit.maintenance_engineer_id,
         addDays(todayStr(), cfg.recommendations_review_days), actor(c), 'New report added - review for additional recommendations');
-      return `${b.team.maintEngineer?.full_name ?? 'The maintenance engineer'} has been given a task to review the new report for recommendations.`;
+      return {
+        message: `${b.team.maintEngineer?.full_name ?? 'The maintenance engineer'} has been given a task to review the new report for recommendations.`,
+        // Land on the plain visit URL - the referer still carries ?prompt-recs=1
+        // and would re-open the dialog forever.
+        redirect: `/visits/${b.visit.id}`,
+      };
     }
   );
 });

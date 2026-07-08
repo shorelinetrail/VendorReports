@@ -99,7 +99,15 @@ document.querySelectorAll('.desc-clip').forEach((el) => {
 });
 
 // Dialogs marked for auto-open (e.g. the "ready to close the visit?" prompt).
-document.querySelectorAll('dialog[data-open-on-load]').forEach((d) => d.showModal());
+// Dismissing one strips the prompt-* query param so a refresh doesn't bring it back.
+document.querySelectorAll('dialog[data-open-on-load]').forEach((d) => {
+  d.showModal();
+  d.addEventListener('close', () => {
+    const url = new URL(window.location);
+    [...url.searchParams.keys()].filter((k) => k.startsWith('prompt-')).forEach((k) => url.searchParams.delete(k));
+    window.history.replaceState(null, '', url);
+  });
+});
 
 // Toast: fade out after a few seconds.
 const toast = document.querySelector('.toast');
