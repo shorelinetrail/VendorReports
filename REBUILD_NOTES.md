@@ -239,6 +239,36 @@ Workflow refinements added after hands-on review of the finished rebuild:
   for screen readers); Actions columns left-aligned; calendar month/year jump
   selector; search fields fill the filter bar; spacing fixes.
 
+### Third wave (2026-07-08)
+
+- **Ad-hoc visits** (migration `0009` rebuilds the visits table): one-off
+  visits outside any maintenance plan, creatable by anyone - vendor,
+  description, required notification number (their identity; no plan number),
+  dates, assignees and review flag live on the visit. Same lifecycle
+  everywhere; all queries handle routine-less visits.
+- **Multi-day visits**: optional end date (creation + confirmation), range
+  display, calendar chips across the span.
+- **Report versioning**: upload modal offers additional-vs-replacement
+  (migration `0008`); replaced files are kept, badged, still downloadable.
+  Uploads allowed at any point except cancelled visits; a post-stage upload
+  prompts "more recommendations needed?" and can rewind the workflow.
+- **Recommendations check**: every report seeds a create-recommendations task;
+  while open the visit can't close. The ME adds recommendations or confirms
+  "no further recommendations" with a required reason (stored as a visit
+  comment), then flows into the close prompt. Visits with zero
+  recommendations can close once confirmed. `sweepCloseTasks` self-heals
+  missing close tasks (daily cron + Settings button).
+- **Task list is view-only**: start/complete shortcuts removed - tasks
+  complete only through their real action on the visit (completing from the
+  list bypassed the workflow). Rows keep open-visit + reassign.
+- Also in this period: visit comments (migration `0006`), assigned-action
+  responses (`0002`), cancel visit (`0003`), admin-on-any-role (`0004`),
+  vendor contact name/number (`0005`, `0007`), vendor detail page with change
+  history, needs-attention dashboard, my-visits filter, visit search,
+  change-my-password, view-report-in-browser, icon row-actions, and the
+  completed task chain. Migrations `0002`-`0009` are pending for any remote
+  deploy.
+
 ## Known limitations
 
 - No email/notification delivery (same as the old app — the in-app
