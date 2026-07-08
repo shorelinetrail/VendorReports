@@ -461,6 +461,8 @@ routes.post('/:id/reports', async (c) => {
 // The ME (or an admin) confirms the latest report raises nothing new - closes
 // the pending recommendations check so the visit can be closed again.
 routes.post('/:id/recommendations-check', async (c) => {
+  const form = await c.req.formData();
+  const reason = String(form.get('reason') ?? '').trim();
   return withVisit(
     c,
     (b) => {
@@ -468,6 +470,11 @@ routes.post('/:id/recommendations-check', async (c) => {
       return p.isMaintEngineer || p.isAdmin;
     },
     async (b) => {
+      if (!reason) throw new Error('A reason is required when confirming no recommendations are needed.');
+      await insertRow(c.env.DB, 'visit_comments', {
+        visit_id: b.visit.id, author_id: c.get('user').id,
+        body: `No recommendations required - ${reason}`, created_at: now(),
+      }, actor(c));
       await completeOpenTasks(c.env.DB, b.visit.id, 'create_recommendations', actor(c));
       const fresh = (await first<Visit>(c.env.DB, 'SELECT * FROM visits WHERE id = ?', b.visit.id))!;
       await maybeCreateCloseTask(c.env.DB, fresh, actor(c));
@@ -1069,6 +1076,10 @@ routes.get('/:id', async (c) => {
   const canRespond = (rec: Rec) => awaitingResponse(rec) && (user.id === rec.action_assigned_to_id || p.isAdmin);
   const sapMissing = (rec: Rec) => rec.review_decision === 'request_sap' && !rec.sap_notification_number;
   const replacedIds = new Set(reports.map((r) => r.replaces_id).filter(Boolean));
+  const liveReportCount = reports.filter((r) => !replacedIds.has(r.id)).length;
+  // "the report" for the first one, "the latest report" once there are several,
+  // "the visit" when it was marked no-report.
+  const reportRef = liveReportCount > 1 ? 'the latest report' : liveReportCount === 1 ? 'the report' : 'the visit';
 
   return page(c, `Visit ${meta.plan_number}`, (
     <>
@@ -1104,11 +1115,10 @@ routes.get('/:id', async (c) => {
           ) : p.pendingRecsCheck && p.isOpen ? (
             <div class="waiting">
               Waiting for <strong>{team.maintEngineer?.full_name ?? 'the maintenance engineer'}</strong> to add
-              recommendations from the latest report, or confirm none are needed.
+              recommendations from {reportRef}, or confirm none are needed.
               {(p.isMaintEngineer || p.isAdmin) && (
                 <span style="margin-left:0.75rem">
-                  <ActionButton action={`/visits/${visit.id}/recommendations-check`} label="No further recommendations"
-                    class="btn btn--sm" confirm="Confirm the latest report raises no new recommendations?" busy="Confirming…" />
+                  <button type="button" class="btn btn--sm" data-modal="no-recs">No further recommendations</button>
                 </span>
               )}
             </div>
@@ -1321,6 +1331,18 @@ routes.get('/:id', async (c) => {
       </Card>
 
       {/* ---- Modals ---- */}
+      {p.pendingRecsCheck && p.isOpen && (p.isMaintEngineer || p.isAdmin) && (
+        <Modal id="no-recs" title="No further recommendations">
+          <form method="post" action={`/visits/${visit.id}/recommendations-check`}>
+            <p class="muted">Confirm that {reportRef} raises no {recs.length > 0 ? 'new ' : ''}recommendations, and record why - it is kept on the visit's comments.</p>
+            <Field label="Reason">
+              <textarea name="reason" rows={3} required placeholder="e.g. routine wear only, nothing actionable"></textarea>
+            </Field>
+            <ModalButtons submit="Confirm - none needed" busy="Confirming…" />
+          </form>
+        </Modal>
+      )}
+
       {(p.isCoordinator || p.isMaintEngineer || p.isAdmin) && c.req.query('prompt-recs') === '1' && (
         <Modal id="prompt-recs" title="More recommendations needed?" autoOpen>
           <div class="modal__content">
