@@ -1,6 +1,9 @@
 import { all, first, run, insertRow, updateRow, now } from './db';
 import { addDays, addMonths, todayStr } from './dates';
-import { isAdmin as isAdminUser, type Recommendation, type Routine, type Task, type TaskType, type User, type Visit } from './types';
+import {
+  isAdmin as isAdminUser,
+  type Recommendation, type Routine, type Task, type TaskType, type User, type Visit, type VisitStatus,
+} from './types';
 
 // ---- System configuration ----
 
@@ -159,14 +162,22 @@ export async function cancelOpenTasks(db: D1Database, visitId: string, type: Tas
   for (const t of rows) await updateRow(db, 'tasks', t.id, { status: 'cancelled' }, actorId);
 }
 
+/** Statuses from which a visit can be wrapped up (report is in, or explicitly absent). */
+export const POST_REPORT_STAGES: VisitStatus[] = ['report_uploaded', 'recommendations_created', 'in_review'];
+
 /**
- * If every recommendation on the visit is completed/cancelled, seed a close_visit
- * task for the maintenance engineer (due in 3 days) unless one is already open.
+ * Seeds a close_visit task for the maintenance engineer (due in 3 days) once
+ * the visit is genuinely ready: report stage passed, every recommendation
+ * resolved (a visit with zero recommendations counts, provided the ME has no
+ * open create-recommendations check outstanding).
  */
 export async function maybeCreateCloseTask(db: D1Database, visit: Visit, actorId: string | null) {
+  if (!POST_REPORT_STAGES.includes(visit.status)) return;
   const recs = await all<Recommendation>(db, 'SELECT * FROM recommendations WHERE visit_id = ?', visit.id);
-  const allDone = recs.length > 0 && recs.every((r) => r.status === 'completed' || r.status === 'cancelled');
-  if (!allDone || visit.status === 'completed' || visit.status === 'cancelled') return;
+  if (!recs.every((r) => r.status === 'completed' || r.status === 'cancelled')) return;
+  const openCheck = await first(
+    db, `SELECT id FROM tasks WHERE visit_id = ? AND task_type = 'create_recommendations' AND status IN ${OPEN_TASK_STATUSES}`, visit.id);
+  if (openCheck) return;
   await createTaskOnce(db, visit.id, 'close_visit', visit.maintenance_engineer_id, addDays(todayStr(), 3), actorId);
 }
 
@@ -217,7 +228,11 @@ export function visitPerms(user: User, visit: Visit, reportCount: number, recs: 
     canReview: isTechEngineer || isAdmin,
     canReschedule: (isCoordinator || isAdmin) && isOpen,
     canCancel: (isCoordinator || isAdmin) && isOpen,
-    canClose: (isMaintEngineer || isAdmin) && isOpen && allRecsDone && !pendingRecsCheck,
+    // Closeable once the report stage has passed, every recommendation is
+    // resolved (zero recommendations qualifies - the pending-check gate ensures
+    // the ME actively confirmed that), and no recommendations check is open.
+    canClose: (isMaintEngineer || isAdmin) && POST_REPORT_STAGES.includes(visit.status) &&
+      recs.every((r) => r.status === 'completed' || r.status === 'cancelled') && !pendingRecsCheck,
     pendingRecsCheck,
     // The assigned team (or an admin) may reopen completed AND cancelled
     // visits; it's audited, so who reopened is always on record.

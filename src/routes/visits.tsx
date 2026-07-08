@@ -471,7 +471,11 @@ routes.post('/:id/recommendations-check', async (c) => {
       await completeOpenTasks(c.env.DB, b.visit.id, 'create_recommendations', actor(c));
       const fresh = (await first<Visit>(c.env.DB, 'SELECT * FROM visits WHERE id = ?', b.visit.id))!;
       await maybeCreateCloseTask(c.env.DB, fresh, actor(c));
-      return 'Confirmed - no further recommendations needed.';
+      // With nothing outstanding the visit is ready to close - prompt for it.
+      return {
+        message: 'Confirmed - no further recommendations needed.',
+        redirect: `/visits/${b.visit.id}?prompt-close=1`,
+      };
     }
   );
 });
@@ -488,7 +492,9 @@ routes.post('/:id/more-recommendations', async (c) => {
     async (b) => {
       const db = c.env.DB;
       if (b.visit.status === 'completed') {
-        const status: VisitStatus = b.recs.some((r) => r.status === 'in_review') ? 'in_review' : 'recommendations_created';
+        const status: VisitStatus = b.recs.length === 0
+          ? 'report_uploaded'
+          : b.recs.some((r) => r.status === 'in_review') ? 'in_review' : 'recommendations_created';
         await updateRow(db, 'visits', b.visit.id, { status, completed_at: null }, actor(c));
       }
       const cfg = await getConfig(db);
