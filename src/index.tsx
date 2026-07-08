@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { requireAuth, requireRole, setImpersonation, flash, hashPassword, verifyPassword } from './auth';
 import { first, updateRow } from './db';
-import { generateVisits, expireTasks } from './workflow';
+import { generateVisits, expireTasks, sweepCloseTasks } from './workflow';
 import type { App, Env, User } from './types';
 
 import authRoutes from './routes/auth';
@@ -80,6 +80,7 @@ export default {
       (async () => {
         const generated = await generateVisits(env.DB);
         const expired = await expireTasks(env.DB);
+        await sweepCloseTasks(env.DB);
         console.log(`cron: created ${generated.created.length} visit(s), marked ${expired} task(s) overdue`,
           generated.errors.length ? { errors: generated.errors } : '');
       })()

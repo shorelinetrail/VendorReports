@@ -101,6 +101,16 @@ export async function generateVisits(db: D1Database): Promise<{ created: string[
   return { created, errors };
 }
 
+/**
+ * Self-heal: any open visit that is ready to close but has no close_visit task
+ * gets one. Covers historical data and any transition path that missed seeding.
+ */
+export async function sweepCloseTasks(db: D1Database): Promise<void> {
+  const candidates = await all<Visit>(
+    db, `SELECT * FROM visits WHERE status IN ('report_uploaded', 'recommendations_created', 'in_review')`);
+  for (const visit of candidates) await maybeCreateCloseTask(db, visit, null);
+}
+
 // ---- Task expiry (daily cron + manual admin trigger) ----
 
 /** Flips past-due pending/in-progress tasks to 'overdue'. Returns how many changed. */

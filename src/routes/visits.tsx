@@ -899,6 +899,10 @@ routes.post('/:id/reopen', async (c) => {
       await createTaskOnce(db, b.visit.id, 'technical_review', b.visit.technical_engineer_id,
         addDays(todayStr(), cfg.technical_review_days), actor(c));
     }
+    // A reopened visit may already be ready to close (all recs resolved) -
+    // make sure the ME gets the close task.
+    const fresh = (await first<Visit>(db, 'SELECT * FROM visits WHERE id = ?', b.visit.id))!;
+    await maybeCreateCloseTask(db, fresh, actor(c));
     return 'Visit reopened.';
   });
 });

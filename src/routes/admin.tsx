@@ -4,7 +4,7 @@ import { all, first, insertRow, updateRow } from '../db';
 import { fmtDate, fmtDateTime } from '../dates';
 import { findUserByEmail, flash, hashPassword, requireRole } from '../auth';
 import { parseCsv, csvObjects, csvResponse } from '../csv';
-import { CONFIG_DEFAULTS, expireTasks, generateVisits, getConfig, setConfigValue, type ConfigKey } from '../workflow';
+import { CONFIG_DEFAULTS, expireTasks, generateVisits, getConfig, setConfigValue, sweepCloseTasks, type ConfigKey } from '../workflow';
 import { page, Card, PageHeader, EmptyState, Modal, ModalButtons, Field, ActionButton, IconAction, IconModalBtn, Badge, Icon, StatCard, visitBadge, recBadge } from '../ui';
 import {
   isAdmin, ROLES, ROLE_LABELS, REC_STATUS_LABELS,
@@ -650,6 +650,7 @@ routes.post('/settings/generate-visits', admin, async (c) => {
 
 routes.post('/settings/expire-tasks', admin, async (c) => {
   const n = await expireTasks(c.env.DB);
+  await sweepCloseTasks(c.env.DB);
   flash(c, n === 0 ? 'No tasks are past their due date.' : `Marked ${n} task(s) overdue.`);
   return c.redirect('/settings');
 });
