@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { requireAuth, requireRole, setImpersonation, flash, hashPassword, verifyPassword } from './auth';
+import { publicOrigin, requireAuth, requireRole, setImpersonation, flash, hashPassword, verifyPassword } from './auth';
 import { first, updateRow } from './db';
 import type { App, User } from './types';
 
@@ -35,7 +35,7 @@ app.post('/account/password', async (c) => {
     flash(c, 'Password changed.');
   }
   const url = new URL(back, c.req.url);
-  return c.redirect(url.origin === new URL(c.req.url).origin ? url.pathname + url.search : '/');
+  return c.redirect([publicOrigin(c), new URL(c.req.url).origin].includes(url.origin) ? url.pathname + url.search : '/');
 });
 
 app.post('/impersonate', requireRole('admin'), async (c) => {

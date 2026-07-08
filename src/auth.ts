@@ -2,11 +2,29 @@ import { createMiddleware } from 'hono/factory';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { Context } from 'hono';
 import { all, first, run, now, type Db } from './db';
+import { TRUST_PROXY } from './env';
 import { isAdmin, type App, type User, type UserRole } from './types';
 
 const SESSION_COOKIE = 'vt_session';
 const SESSION_DAYS = 30;
 const PBKDF2_ITERATIONS = 100_000;
+
+/**
+ * The origin the BROWSER sees. Directly exposed, that is the request URL's
+ * origin; behind a trusted TLS-terminating proxy the connection is plain
+ * http internally, so the public origin comes from the forwarded headers.
+ * Drives the session cookie's secure flag, the CSRF origin check, and the
+ * same-origin referer checks.
+ */
+export function publicOrigin(c: Context): string {
+  const url = new URL(c.req.url);
+  if (TRUST_PROXY) {
+    const proto = c.req.header('x-forwarded-proto')?.split(',')[0]?.trim();
+    const host = c.req.header('x-forwarded-host')?.split(',')[0]?.trim() ?? url.host;
+    if (proto === 'http' || proto === 'https') return `${proto}://${host}`;
+  }
+  return url.origin;
+}
 
 const hex = (buf: ArrayBuffer | Uint8Array) =>
   [...new Uint8Array(buf instanceof Uint8Array ? buf : new Uint8Array(buf))]
@@ -58,7 +76,7 @@ export function setSessionCookie(c: Context, token: string) {
     path: '/',
     httpOnly: true,
     sameSite: 'Lax',
-    secure: new URL(c.req.url).protocol === 'https:',
+    secure: publicOrigin(c).startsWith('https:'),
     maxAge: SESSION_DAYS * 86400,
   });
 }
@@ -87,7 +105,7 @@ export async function needsSetup(db: Db): Promise<boolean> {
 export const requireAuth = createMiddleware<App>(async (c, next) => {
   if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
     const origin = c.req.header('origin');
-    if (origin && origin !== new URL(c.req.url).origin) return c.text('Cross-origin request rejected', 403);
+    if (origin && origin !== publicOrigin(c)) return c.text('Cross-origin request rejected', 403);
   }
 
   const token = getCookie(c, SESSION_COOKIE);

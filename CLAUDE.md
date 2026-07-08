@@ -28,7 +28,9 @@ Run it after any workflow/permission change; add a check with every fix.
 
 Config via env vars, all defaulted for local dev (`src/env.ts`):
 `DATABASE_URL` (postgres://postgres:postgres@localhost:5432/vendortrak),
-`PORT` (8788), `FILES_DIR` (data/reports).
+`PORT` (8788), `FILES_DIR` (data/reports), `TRUST_PROXY` (unset; set to 1
+only behind a TLS-terminating reverse proxy - `publicOrigin()` in auth.ts
+then honors X-Forwarded-Proto/-Host for secure cookies + CSRF).
 
 ## Local dev environment (state you inherit)
 

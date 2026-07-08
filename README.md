@@ -20,6 +20,21 @@ By default it connects to `postgres://postgres:postgres@localhost:5432/vendortra
 set `DATABASE_URL` to override (plus `PORT` and `FILES_DIR` if needed — see
 `src/env.ts`).
 
+## Deploying to a server
+
+Requirements: Node.js 20+, a PostgreSQL database, and a persistent directory
+for uploaded report files (`FILES_DIR`) — back up both. Run
+`npm ci && npm run db:migrate && npm run start` under a process manager that
+keeps it running (the daily visit-generation job runs in-process at 06:00
+UTC). No outbound network access, email, or other services are needed; user
+accounts are created in the app (first visit sets up the admin).
+
+Behind a TLS-terminating reverse proxy, set **`TRUST_PROXY=1`** and make sure
+the proxy sends `X-Forwarded-Proto` (and `X-Forwarded-Host` if it rewrites
+the host): the app uses them for secure session cookies and its CSRF origin
+check. Without that variable, forwarded headers are ignored — correct when
+the app is exposed directly.
+
 The first visit walks you through creating the admin account. Admins then add
 users, vendors and routines; the daily job (or the "Generate Visits Now" button
 in Settings) creates the visits.

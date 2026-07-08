@@ -8,7 +8,7 @@
 import { Hono } from 'hono';
 import { all, first, insertRow, updateRow, deleteRow, now } from '../db';
 import { addDays, fmtDate, fmtDateTime, fmtRange, todayStr } from '../dates';
-import { flash, activeUsers } from '../auth';
+import { flash, activeUsers, publicOrigin } from '../auth';
 import {
   cancelOpenTasks, completeOpenTasks, createTask, createTaskOnce, getConfig, maybeCreateCloseTask, visitPerms, waitingFor,
 } from '../workflow';
@@ -357,7 +357,7 @@ async function withVisit(
   const referer = c.req.header('referer');
   if (referer) {
     const url = new URL(referer);
-    if (url.origin === new URL(c.req.url).origin) back = url.pathname + url.search;
+    if ([publicOrigin(c), new URL(c.req.url).origin].includes(url.origin)) back = url.pathname + url.search;
   }
   const bundle = await loadVisit(c, id);
   if (!bundle) return c.text('Visit not found', 404);
