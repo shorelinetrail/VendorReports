@@ -178,6 +178,6 @@ state; reschedule resets to scheduled.
   `{message, redirect}`) → mutate via audited helpers.
 - No em dashes in UI text (user preference) - use plain hyphens. Empty cell
   placeholder is '-'.
-- Commit style: logical chunks, imperative subject, body explains the why;
-  the user pushes (`git push` hangs for Claude - ask the user to run it via
-  `!`). Verify every change end-to-end with curl before committing.
+- Commit style: logical chunks, imperative subject, body explains the why.
+  Verify every change end-to-end with curl before committing. Ask before
+  pushing unless the user has already told you to push.
