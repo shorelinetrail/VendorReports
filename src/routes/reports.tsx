@@ -16,7 +16,7 @@ interface ReportRow {
 }
 
 const SORTS: Record<string, string> = {
-  plan: 'r.plan_number', vendor: 've.name', visit: 'v.scheduled_date', uploaded: 'vr.uploaded_at',
+  plan: 'plan_number', vendor: 've.name', visit: 'v.scheduled_date', uploaded: 'vr.uploaded_at',
 };
 
 routes.get('/reports', async (c) => {
@@ -30,8 +30,8 @@ routes.get('/reports', async (c) => {
   const where: string[] = [];
   const params: unknown[] = [];
   if (q) {
-    where.push('(r.plan_number LIKE ? OR r.description LIKE ? OR ve.name LIKE ? OR vr.file_name LIKE ?)');
-    params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+    where.push('(r.plan_number LIKE ? OR COALESCE(r.description, v.description) LIKE ? OR ve.name LIKE ? OR vr.file_name LIKE ? OR v.notification_number LIKE ?)');
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
   }
   if (vendor !== 'all') { where.push('ve.id = ?'); params.push(vendor); }
   if (status !== 'all') { where.push('v.status = ?'); params.push(status); }
@@ -40,11 +40,11 @@ routes.get('/reports', async (c) => {
     all<ReportRow>(
       db,
       `SELECT vr.id, vr.visit_id, vr.file_name, vr.uploaded_at, u.full_name AS uploaded_by_name,
-              r.plan_number, r.description, ve.name AS vendor_name, v.scheduled_date, v.status
+              COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number, COALESCE(r.description, v.description, '') AS description, ve.name AS vendor_name, v.scheduled_date, v.status
        FROM visit_reports vr
        JOIN visits v ON v.id = vr.visit_id
-       JOIN routines r ON r.id = v.routine_id
-       JOIN vendors ve ON ve.id = r.vendor_id
+       LEFT JOIN routines r ON r.id = v.routine_id
+       JOIN vendors ve ON ve.id = COALESCE(r.vendor_id, v.vendor_id)
        JOIN users u ON u.id = vr.uploaded_by_id
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
        ORDER BY ${SORTS[sort]} ${dir}`,
@@ -53,7 +53,7 @@ routes.get('/reports', async (c) => {
     all<{ id: string; name: string }>(
       db,
       `SELECT DISTINCT ve.id, ve.name FROM visit_reports vr
-       JOIN visits v ON v.id = vr.visit_id JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = r.vendor_id
+       JOIN visits v ON v.id = vr.visit_id LEFT JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = COALESCE(r.vendor_id, v.vendor_id)
        ORDER BY ve.name`
     ),
   ]);
@@ -135,7 +135,7 @@ async function loadAnalytics(db: D1Database, months: number): Promise<AnalyticsD
     all<AnalyticsData['visits'][number]>(
       db,
       `SELECT v.status, v.scheduled_date, ve.name AS vendor_name
-       FROM visits v JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = r.vendor_id
+       FROM visits v LEFT JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = COALESCE(r.vendor_id, v.vendor_id)
        WHERE v.scheduled_date >= ?`,
       from
     ),
@@ -143,7 +143,7 @@ async function loadAnalytics(db: D1Database, months: number): Promise<AnalyticsD
       db,
       `SELECT rec.status, rec.due_date, rec.created_at, rec.completed_at, ve.name AS vendor_name
        FROM recommendations rec JOIN visits v ON v.id = rec.visit_id
-       JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = r.vendor_id
+       LEFT JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = COALESCE(r.vendor_id, v.vendor_id)
        WHERE rec.created_at >= ?`,
       from
     ),

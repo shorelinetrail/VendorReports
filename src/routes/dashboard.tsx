@@ -1,12 +1,12 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import { all, first } from '../db';
-import { addDays, fmtDate, monthStart, todayStr } from '../dates';
+import { addDays, fmtDate, fmtRange, monthStart, todayStr } from '../dates';
 import { page, StatCard, Card, EmptyState, taskBadge, visitBadge, isTaskOverdue } from '../ui';
 import { isAdmin, TASK_TYPE_LABELS, VISIT_STATUS_LABELS } from '../types';
 import type { App, TaskStatus, TaskType, VisitStatus } from '../types';
 
-interface CalVisit { id: string; scheduled_date: string; status: VisitStatus; plan_number: string; vendor_name: string; description: string }
+interface CalVisit { id: string; scheduled_date: string; end_date: string | null; status: VisitStatus; plan_number: string; vendor_name: string; description: string }
 
 /** 42 day-strings (Mon-start, 6 weeks) covering the given YYYY-MM month. */
 function calendarDays(month: string): string[] {
@@ -55,33 +55,33 @@ routes.get('/', async (c) => {
     ),
     all<{ id: string; task_type: TaskType; due_date: string; status: TaskStatus; visit_id: string; plan_number: string; vendor_name: string }>(
       db,
-      `SELECT t.id, t.task_type, t.due_date, t.status, t.visit_id, r.plan_number, ve.name AS vendor_name
-       FROM tasks t JOIN visits v ON v.id = t.visit_id JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = r.vendor_id
+      `SELECT t.id, t.task_type, t.due_date, t.status, t.visit_id, COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number, ve.name AS vendor_name
+       FROM tasks t JOIN visits v ON v.id = t.visit_id LEFT JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = COALESCE(r.vendor_id, v.vendor_id)
        WHERE t.assigned_to_id = ? AND t.status IN ('pending', 'in_progress', 'overdue')
        ORDER BY t.due_date`,
       user.id
     ),
-    all<{ id: string; scheduled_date: string; status: VisitStatus; plan_number: string; vendor_name: string }>(
+    all<{ id: string; scheduled_date: string; end_date: string | null; status: VisitStatus; plan_number: string; vendor_name: string }>(
       db,
-      `SELECT v.id, v.scheduled_date, v.status, r.plan_number, ve.name AS vendor_name
-       FROM visits v JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = r.vendor_id
+      `SELECT v.id, v.scheduled_date, v.status, v.end_date, COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number, ve.name AS vendor_name
+       FROM visits v LEFT JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = COALESCE(r.vendor_id, v.vendor_id)
        WHERE v.scheduled_date BETWEEN ? AND ? AND v.status NOT IN ('completed', 'cancelled')
        ORDER BY v.scheduled_date LIMIT 5`,
       today, addDays(today, 30)
     ),
     all<CalVisit>(
       db,
-      `SELECT v.id, v.scheduled_date, v.status, r.plan_number, r.description, ve.name AS vendor_name
-       FROM visits v JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = r.vendor_id
-       WHERE v.scheduled_date BETWEEN ? AND ? ORDER BY v.scheduled_date`,
-      days[0]!, days[41]!
+      `SELECT v.id, v.scheduled_date, v.status, v.end_date, COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number, COALESCE(r.description, v.description, '') AS description, ve.name AS vendor_name
+       FROM visits v LEFT JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = COALESCE(r.vendor_id, v.vendor_id)
+       WHERE v.scheduled_date <= ? AND COALESCE(v.end_date, v.scheduled_date) >= ? ORDER BY v.scheduled_date`,
+      days[41]!, days[0]!
     ),
     selected
       ? all<CalVisit>(
           db,
-          `SELECT v.id, v.scheduled_date, v.status, r.plan_number, r.description, ve.name AS vendor_name
-           FROM visits v JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = r.vendor_id
-           WHERE v.scheduled_date = ? ORDER BY r.plan_number`,
+          `SELECT v.id, v.scheduled_date, v.status, v.end_date, COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number, COALESCE(r.description, v.description, '') AS description, ve.name AS vendor_name
+           FROM visits v LEFT JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = COALESCE(r.vendor_id, v.vendor_id)
+           WHERE ? BETWEEN v.scheduled_date AND COALESCE(v.end_date, v.scheduled_date) ORDER BY plan_number`,
           selected
         )
       : Promise.resolve([] as CalVisit[]),
@@ -94,10 +94,10 @@ routes.get('/', async (c) => {
   if (isAdmin(user) || user.role === 'vendor_coordinator') {
     const taskRows = await all<Attention & { task_type: TaskType }>(
       db,
-      `SELECT v.id, v.status, r.plan_number, ve.name AS vendor_name, t.task_type, t.due_date, u.full_name AS assignee_name
+      `SELECT v.id, v.status, COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number, ve.name AS vendor_name, t.task_type, t.due_date, u.full_name AS assignee_name
        FROM visits v
-       JOIN routines r ON r.id = v.routine_id
-       JOIN vendors ve ON ve.id = r.vendor_id
+       LEFT JOIN routines r ON r.id = v.routine_id
+       JOIN vendors ve ON ve.id = COALESCE(r.vendor_id, v.vendor_id)
        JOIN tasks t ON t.visit_id = v.id AND t.status IN ('pending', 'in_progress', 'overdue') AND t.due_date < ?
        JOIN users u ON u.id = t.assigned_to_id
        WHERE v.status NOT IN ('completed', 'cancelled')
@@ -106,11 +106,11 @@ routes.get('/', async (c) => {
     );
     const recRows = await all<Attention>(
       db,
-      `SELECT v.id, v.status, r.plan_number, ve.name AS vendor_name, 'Recommendation' AS what, rec.due_date, u.full_name AS assignee_name
+      `SELECT v.id, v.status, COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number, ve.name AS vendor_name, 'Recommendation' AS what, rec.due_date, u.full_name AS assignee_name
        FROM recommendations rec
        JOIN visits v ON v.id = rec.visit_id
-       JOIN routines r ON r.id = v.routine_id
-       JOIN vendors ve ON ve.id = r.vendor_id
+       LEFT JOIN routines r ON r.id = v.routine_id
+       JOIN vendors ve ON ve.id = COALESCE(r.vendor_id, v.vendor_id)
        JOIN users u ON u.id = COALESCE(rec.action_assigned_to_id, v.maintenance_engineer_id)
        WHERE rec.due_date < ? AND rec.status IN ('open', 'in_review', 'approved')
          AND v.status NOT IN ('completed', 'cancelled')
@@ -126,11 +126,17 @@ routes.get('/', async (c) => {
   }
 
   const overdueCount = myTasks.filter((t) => isTaskOverdue(t.status, t.due_date)).length;
+  // Multi-day visits get a chip on every day of their span (clamped to the grid).
   const byDay = new Map<string, CalVisit[]>();
   for (const v of calVisits) {
-    const list = byDay.get(v.scheduled_date) ?? [];
-    list.push(v);
-    byDay.set(v.scheduled_date, list);
+    const from = v.scheduled_date < days[0]! ? days[0]! : v.scheduled_date;
+    const last = v.end_date ?? v.scheduled_date;
+    const to = last > days[41]! ? days[41]! : last;
+    for (let d = from; d <= to; d = addDays(d, 1)) {
+      const list = byDay.get(d) ?? [];
+      list.push(v);
+      byDay.set(d, list);
+    }
   }
   const keepCal = (date?: string) => `/?cal=${month}${date ? `&date=${date}` : ''}`;
 
@@ -250,7 +256,7 @@ routes.get('/', async (c) => {
                       <a class="rowlink" href={`/visits/${v.id}`}>{v.plan_number}</a>
                       <div class="muted">{v.vendor_name}</div>
                     </td>
-                    <td>{fmtDate(v.scheduled_date)}</td>
+                    <td>{fmtRange(v.scheduled_date, v.end_date)}</td>
                     <td class="actions">{visitBadge(v.status)}</td>
                   </tr>
                 ))}

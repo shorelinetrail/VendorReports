@@ -213,8 +213,8 @@ async function getNotifications(c: Context<App>): Promise<Notification[]> {
   const items: Notification[] = [];
   const tasks = await all<{ id: string; task_type: TaskType; due_date: string; status: TaskStatus; visit_id: string; plan_number: string }>(
     c.env.DB,
-    `SELECT t.id, t.task_type, t.due_date, t.status, t.visit_id, r.plan_number
-     FROM tasks t JOIN visits v ON v.id = t.visit_id JOIN routines r ON r.id = v.routine_id
+    `SELECT t.id, t.task_type, t.due_date, t.status, t.visit_id, COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number
+     FROM tasks t JOIN visits v ON v.id = t.visit_id LEFT JOIN routines r ON r.id = v.routine_id
      WHERE t.assigned_to_id = ? AND t.status IN ('pending', 'in_progress', 'overdue')
      ORDER BY t.due_date LIMIT 5`,
     user.id
@@ -228,8 +228,8 @@ async function getNotifications(c: Context<App>): Promise<Notification[]> {
   if (isAdmin(user) || user.role === 'technical_engineer') {
     const recs = await all<{ id: string; description: string; visit_id: string; plan_number: string }>(
       c.env.DB,
-      `SELECT rec.id, rec.description, rec.visit_id, r.plan_number
-       FROM recommendations rec JOIN visits v ON v.id = rec.visit_id JOIN routines r ON r.id = v.routine_id
+      `SELECT rec.id, rec.description, rec.visit_id, COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number
+       FROM recommendations rec JOIN visits v ON v.id = rec.visit_id LEFT JOIN routines r ON r.id = v.routine_id
        WHERE rec.status = 'in_review' ORDER BY rec.created_at DESC LIMIT 3`
     );
     for (const r of recs) {
@@ -243,8 +243,8 @@ async function getNotifications(c: Context<App>): Promise<Notification[]> {
   // assignee, the visit's maintenance engineer, and admins.
   const overdueRecs = await all<{ description: string; due_date: string; visit_id: string; plan_number: string }>(
     c.env.DB,
-    `SELECT rec.description, rec.due_date, rec.visit_id, r.plan_number
-     FROM recommendations rec JOIN visits v ON v.id = rec.visit_id JOIN routines r ON r.id = v.routine_id
+    `SELECT rec.description, rec.due_date, rec.visit_id, COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number
+     FROM recommendations rec JOIN visits v ON v.id = rec.visit_id LEFT JOIN routines r ON r.id = v.routine_id
      WHERE rec.due_date < ? AND rec.status IN ('open', 'in_review', 'approved')
        AND v.status NOT IN ('completed', 'cancelled')
        AND (? OR rec.action_assigned_to_id = ? OR v.maintenance_engineer_id = ?)

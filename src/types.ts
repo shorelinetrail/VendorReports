@@ -69,8 +69,14 @@ export interface Routine {
 
 export interface Visit {
   id: string;
-  routine_id: string;
+  /** Null for ad-hoc visits, which carry vendor/description/review flag directly. */
+  routine_id: string | null;
+  vendor_id: string | null;
+  description: string | null;
+  requires_technical_review: number | null;
   scheduled_date: string;
+  /** Last day of a multi-day visit; null for single-day. */
+  end_date: string | null;
   confirmed_date: string | null;
   confirmed_at: string | null;
   notification_number: string | null;

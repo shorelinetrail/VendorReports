@@ -30,12 +30,12 @@ routes.get('/', requireRole('admin', 'maintenance_engineer', 'technical_engineer
 
   const recs = await all<RecRow>(
     c.env.DB,
-    `SELECT rec.*, r.plan_number, ve.name AS vendor_name, cb.full_name AS created_by_name, rb.full_name AS reviewed_by_name,
+    `SELECT rec.*, COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number, ve.name AS vendor_name, cb.full_name AS created_by_name, rb.full_name AS reviewed_by_name,
             v.maintenance_engineer_id, v.technical_engineer_id, v.status AS visit_status
      FROM recommendations rec
      JOIN visits v ON v.id = rec.visit_id
-     JOIN routines r ON r.id = v.routine_id
-     JOIN vendors ve ON ve.id = r.vendor_id
+     LEFT JOIN routines r ON r.id = v.routine_id
+     JOIN vendors ve ON ve.id = COALESCE(r.vendor_id, v.vendor_id)
      JOIN users cb ON cb.id = rec.created_by_id
      LEFT JOIN users rb ON rb.id = rec.reviewed_by_id
      ORDER BY rec.created_at DESC`

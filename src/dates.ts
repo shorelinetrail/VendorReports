@@ -43,6 +43,13 @@ export function fmtDateTime(iso: string | null | undefined): string {
   return t ? `${fmtDate(iso)}, ${t} UTC` : fmtDate(iso);
 }
 
+/** 'Jul 7, 2026' or 'Jul 7 - Jul 9, 2026' when the span has an end date. */
+export function fmtRange(start: string | null | undefined, end: string | null | undefined): string {
+  if (!start) return '-';
+  if (!end || end === start) return fmtDate(start);
+  return `${fmtDate(start)} - ${fmtDate(end)}`;
+}
+
 /** 'YYYY-MM' bucket. */
 export const monthKey = (dateStr: string) => dateStr.slice(0, 7);
 

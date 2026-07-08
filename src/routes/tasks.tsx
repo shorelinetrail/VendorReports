@@ -29,11 +29,11 @@ routes.get('/', async (c) => {
 
   const tasks = await all<TaskRow>(
     db,
-    `SELECT t.*, r.plan_number, ve.name AS vendor_name, u.full_name AS assigned_to_name, v.vendor_coordinator_id
+    `SELECT t.*, COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number, ve.name AS vendor_name, u.full_name AS assigned_to_name, v.vendor_coordinator_id
      FROM tasks t
      JOIN visits v ON v.id = t.visit_id
-     JOIN routines r ON r.id = v.routine_id
-     JOIN vendors ve ON ve.id = r.vendor_id
+     LEFT JOIN routines r ON r.id = v.routine_id
+     JOIN vendors ve ON ve.id = COALESCE(r.vendor_id, v.vendor_id)
      JOIN users u ON u.id = t.assigned_to_id
      ${showAll ? '' : 'WHERE t.assigned_to_id = ?'}
      ORDER BY t.due_date`,

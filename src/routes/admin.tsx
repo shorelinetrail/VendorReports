@@ -333,22 +333,22 @@ routes.get('/vendors/:id', async (c) => {
       vendor.id),
     all<Visit & { plan_number: string }>(
       db,
-      `SELECT v.*, r.plan_number FROM visits v JOIN routines r ON r.id = v.routine_id
-       WHERE r.vendor_id = ? ORDER BY v.scheduled_date DESC LIMIT 15`,
+      `SELECT v.*, COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number FROM visits v LEFT JOIN routines r ON r.id = v.routine_id
+       WHERE COALESCE(r.vendor_id, v.vendor_id) = ? ORDER BY v.scheduled_date DESC LIMIT 15`,
       vendor.id),
     all<Recommendation & { plan_number: string }>(
       db,
-      `SELECT rec.*, r.plan_number FROM recommendations rec
-       JOIN visits v ON v.id = rec.visit_id JOIN routines r ON r.id = v.routine_id
-       WHERE r.vendor_id = ? AND rec.status IN ('open', 'in_review', 'approved')
+      `SELECT rec.*, COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number FROM recommendations rec
+       JOIN visits v ON v.id = rec.visit_id LEFT JOIN routines r ON r.id = v.routine_id
+       WHERE COALESCE(r.vendor_id, v.vendor_id) = ? AND rec.status IN ('open', 'in_review', 'approved')
        ORDER BY rec.due_date IS NULL, rec.due_date`,
       vendor.id),
     first<{ total: number; completed: number; reports: number }>(
       db,
       `SELECT
-         (SELECT COUNT(*) FROM visits v JOIN routines r ON r.id = v.routine_id WHERE r.vendor_id = ?1) AS total,
-         (SELECT COUNT(*) FROM visits v JOIN routines r ON r.id = v.routine_id WHERE r.vendor_id = ?1 AND v.status = 'completed') AS completed,
-         (SELECT COUNT(*) FROM visit_reports vr JOIN visits v ON v.id = vr.visit_id JOIN routines r ON r.id = v.routine_id WHERE r.vendor_id = ?1) AS reports`,
+         (SELECT COUNT(*) FROM visits v LEFT JOIN routines r ON r.id = v.routine_id WHERE COALESCE(r.vendor_id, v.vendor_id) = ?1) AS total,
+         (SELECT COUNT(*) FROM visits v LEFT JOIN routines r ON r.id = v.routine_id WHERE COALESCE(r.vendor_id, v.vendor_id) = ?1 AND v.status = 'completed') AS completed,
+         (SELECT COUNT(*) FROM visit_reports vr JOIN visits v ON v.id = vr.visit_id LEFT JOIN routines r ON r.id = v.routine_id WHERE COALESCE(r.vendor_id, v.vendor_id) = ?1) AS reports`,
       vendor.id),
   ]);
 

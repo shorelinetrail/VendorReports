@@ -7,7 +7,7 @@
  */
 import { Hono } from 'hono';
 import { all, first, insertRow, updateRow, deleteRow, now } from '../db';
-import { addDays, fmtDate, fmtDateTime, todayStr } from '../dates';
+import { addDays, fmtDate, fmtDateTime, fmtRange, todayStr } from '../dates';
 import { flash, activeUsers } from '../auth';
 import {
   cancelOpenTasks, completeOpenTasks, createTask, createTaskOnce, getConfig, maybeCreateCloseTask, visitPerms, waitingFor,
@@ -43,7 +43,7 @@ routes.get('/', async (c) => {
     params.push(statusFilter);
   }
   if (q) {
-    where.push('(r.plan_number LIKE ? OR ve.name LIKE ? OR ve.vendor_number LIKE ? OR r.description LIKE ? OR v.notification_number LIKE ?)');
+    where.push('(r.plan_number LIKE ? OR ve.name LIKE ? OR ve.vendor_number LIKE ? OR COALESCE(r.description, v.description) LIKE ? OR v.notification_number LIKE ?)');
     params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
   }
   if (mine) {
@@ -52,19 +52,25 @@ routes.get('/', async (c) => {
   }
   const visits = await all<Visit & { plan_number: string; vendor_name: string }>(
     db,
-    `SELECT v.*, r.plan_number, ve.name AS vendor_name
-     FROM visits v JOIN routines r ON r.id = v.routine_id JOIN vendors ve ON ve.id = r.vendor_id
+    `SELECT v.*, COALESCE(r.plan_number, 'Ad-hoc ' || v.notification_number, 'Ad-hoc') AS plan_number, ve.name AS vendor_name
+     FROM visits v
+     LEFT JOIN routines r ON r.id = v.routine_id
+     JOIN vendors ve ON ve.id = COALESCE(r.vendor_id, v.vendor_id)
      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
      ORDER BY v.scheduled_date DESC`,
     ...params
   );
-  const routines = canManage
-    ? await all<Routine>(db, 'SELECT * FROM routines WHERE is_active = 1 ORDER BY plan_number')
-    : [];
+  const [routines, vendors, usersList] = await Promise.all([
+    canManage ? all<Routine>(db, 'SELECT * FROM routines WHERE is_active = 1 ORDER BY plan_number') : Promise.resolve([] as Routine[]),
+    all<Vendor>(db, 'SELECT * FROM vendors WHERE is_active = 1 ORDER BY name'),
+    activeUsers(db),
+  ]);
+  const byRole = (role: string) => usersList.filter((u) => u.role === role || isAdmin(u));
 
   return page(c, 'Visits', (
     <>
       <PageHeader title="Maintenance Visits" sub="Track and manage scheduled maintenance visits">
+        <button class="btn" data-modal="adhoc-visit"><Icon name="plus" size={16} /> Ad-hoc Visit</button>
         {canManage && <button class="btn btn--primary" data-modal="create-visit"><Icon name="plus" size={16} /> Create Visit</button>}
       </PageHeader>
 
@@ -102,7 +108,7 @@ routes.get('/', async (c) => {
                   <tr data-href={`/visits/${v.id}`}>
                     <td><a class="rowlink" href={`/visits/${v.id}`}>{v.plan_number}</a></td>
                     <td>{v.vendor_name}</td>
-                    <td>{fmtDate(v.scheduled_date)}</td>
+                    <td>{fmtRange(v.scheduled_date, v.end_date)}</td>
                     <td>{fmtDate(v.confirmed_date)}</td>
                     <td>{v.notification_number ?? '-'}</td>
                     <td>{visitBadge(v.status)}</td>
@@ -135,15 +141,97 @@ routes.get('/', async (c) => {
                 {routines.map((r) => <option value={r.id}>{r.plan_number} - {r.description.slice(0, 60)}</option>)}
               </select>
             </Field>
-            <Field label="Scheduled date">
-              <input type="date" name="scheduled_date" required />
-            </Field>
+            <div class="form-grid">
+              <Field label="Scheduled date">
+                <input type="date" name="scheduled_date" required />
+              </Field>
+              <Field label="End date (optional)" hint="For visits spanning several days.">
+                <input type="date" name="end_date" />
+              </Field>
+            </div>
             <ModalButtons submit="Create Visit" />
           </form>
         </Modal>
       )}
+
+      <Modal id="adhoc-visit" title="Create Ad-hoc Visit">
+        <form method="post" action="/visits/adhoc">
+          <p class="muted">One-off visit outside any maintenance plan - identified by its notification number.</p>
+          <Field label="Vendor">
+            <select name="vendor_id" required>
+              <option value="">Select a vendor…</option>
+              {vendors.map((ve) => <option value={ve.id}>{ve.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Description">
+            <textarea name="description" rows={2} required placeholder="What is this visit for?"></textarea>
+          </Field>
+          <Field label="Notification #">
+            <input name="notification_number" required placeholder="e.g. NOT-2026-0042" />
+          </Field>
+          <div class="form-grid">
+            <Field label="Scheduled date"><input type="date" name="scheduled_date" required /></Field>
+            <Field label="End date (optional)"><input type="date" name="end_date" /></Field>
+          </div>
+          {(
+            [
+              ['Vendor coordinator', 'vendor_coordinator_id', 'vendor_coordinator'],
+              ['Maintenance engineer', 'maintenance_engineer_id', 'maintenance_engineer'],
+              ['Technical engineer', 'technical_engineer_id', 'technical_engineer'],
+            ] as const
+          ).map(([label, name, role]) => (
+            <Field label={label}>
+              <select name={name} required>
+                <option value="">Select…</option>
+                {byRole(role).map((u) => (
+                  <option value={u.id} selected={u.id === user.id}>{u.full_name} ({ROLE_LABELS[u.role]})</option>
+                ))}
+              </select>
+            </Field>
+          ))}
+          <label class="check">
+            <input type="checkbox" name="requires_technical_review" checked /> Recommendations require technical review
+          </label>
+          <ModalButtons submit="Create Ad-hoc Visit" />
+        </form>
+      </Modal>
     </>
   ));
+});
+
+// Ad-hoc visits: anyone can raise one; there is no plan number, just the
+// notification number, and the vendor/description live on the visit itself.
+routes.post('/adhoc', async (c) => {
+  const form = await c.req.formData();
+  const get = (k: string) => String(form.get(k) ?? '').trim();
+  const date = get('scheduled_date');
+  const endDate = get('end_date');
+  const vendor = await first<Vendor>(c.env.DB, 'SELECT * FROM vendors WHERE id = ?', get('vendor_id'));
+  if (!vendor || !get('description') || !get('notification_number') || !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      !get('vendor_coordinator_id') || !get('maintenance_engineer_id') || !get('technical_engineer_id')) {
+    flash(c, 'Fill in the vendor, description, notification number, date and all three assignees.', 'err');
+    return c.redirect('/visits');
+  }
+  if (endDate && (!/^\d{4}-\d{2}-\d{2}$/.test(endDate) || endDate < date)) {
+    flash(c, 'The end date must be on or after the scheduled date.', 'err');
+    return c.redirect('/visits');
+  }
+  const visit = await insertRow<Visit>(c.env.DB, 'visits', {
+    routine_id: null, vendor_id: vendor.id, description: get('description'),
+    requires_technical_review: form.has('requires_technical_review') ? 1 : 0,
+    notification_number: get('notification_number'),
+    scheduled_date: date, end_date: endDate || null, status: 'scheduled',
+    vendor_coordinator_id: get('vendor_coordinator_id'),
+    maintenance_engineer_id: get('maintenance_engineer_id'),
+    technical_engineer_id: get('technical_engineer_id'),
+  }, c.get('realUser').id);
+  const cfg = await getConfig(c.env.DB);
+  const due = addDays(date, -cfg.visit_confirmation_days);
+  if (due > todayStr()) {
+    await createTask(c.env.DB, visit.id, 'confirm_visit_date', visit.vendor_coordinator_id, due, c.get('realUser').id);
+  }
+  flash(c, `Ad-hoc visit ${visit.notification_number} created for ${vendor.name}.`);
+  return c.redirect(`/visits/${visit.id}`);
 });
 
 routes.post('/', async (c) => {
@@ -152,14 +240,19 @@ routes.post('/', async (c) => {
   const form = await c.req.formData();
   const routineId = String(form.get('routine_id') ?? '');
   const date = String(form.get('scheduled_date') ?? '');
+  const endDate = String(form.get('end_date') ?? '').trim();
   const routine = await first<Routine>(c.env.DB, 'SELECT * FROM routines WHERE id = ?', routineId);
   if (!routine || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     flash(c, 'Pick a routine and a valid date.', 'err');
     return c.redirect('/visits');
   }
+  if (endDate && (!/^\d{4}-\d{2}-\d{2}$/.test(endDate) || endDate < date)) {
+    flash(c, 'The end date must be on or after the scheduled date.', 'err');
+    return c.redirect('/visits');
+  }
   try {
     const visit = await insertRow<Visit>(c.env.DB, 'visits', {
-      routine_id: routine.id, scheduled_date: date, status: 'scheduled',
+      routine_id: routine.id, scheduled_date: date, end_date: endDate || null, status: 'scheduled',
       vendor_coordinator_id: routine.vendor_coordinator_id,
       maintenance_engineer_id: routine.maintenance_engineer_id,
       technical_engineer_id: routine.technical_engineer_id,
@@ -176,7 +269,11 @@ routes.post('/', async (c) => {
 
 interface VisitBundle {
   visit: Visit;
-  routine: Routine & { vendor_name: string; vendor_contact: string | null; vendor_email: string | null; vendor_phone: string | null };
+  /** Plan/vendor/review facts, from the routine or (for ad-hoc visits) the visit itself. */
+  meta: {
+    plan_number: string; description: string; requires_technical_review: number; is_adhoc: boolean;
+    vendor_id: string; vendor_name: string; vendor_contact: string | null; vendor_email: string | null; vendor_phone: string | null;
+  };
   recs: (Recommendation & { created_by_name: string; reviewed_by_name: string | null; action_assigned_name: string | null })[];
   reports: (VisitReport & { uploaded_by_name: string })[];
   tasks: Task[];
@@ -188,13 +285,17 @@ async function loadVisit(c: Context<App>, id: string): Promise<VisitBundle | nul
   const db = c.env.DB;
   const visit = await first<Visit>(db, 'SELECT * FROM visits WHERE id = ?', id);
   if (!visit) return null;
-  const [routine, recs, reports, tasks, comments, coordinator, maintEngineer, techEngineer] = await Promise.all([
-    first<VisitBundle['routine']>(
-      db,
-      `SELECT r.*, v.name AS vendor_name, v.contact_name AS vendor_contact,
-              v.contact_email AS vendor_email, v.contact_phone AS vendor_phone
-       FROM routines r JOIN vendors v ON v.id = r.vendor_id WHERE r.id = ?`,
-      visit.routine_id),
+  type RoutineRow = Routine & { vendor_name: string; vendor_contact: string | null; vendor_email: string | null; vendor_phone: string | null };
+  const [routine, adhocVendor, recs, reports, tasks, comments, coordinator, maintEngineer, techEngineer] = await Promise.all([
+    visit.routine_id
+      ? first<RoutineRow>(
+          db,
+          `SELECT r.*, v.name AS vendor_name, v.contact_name AS vendor_contact,
+                  v.contact_email AS vendor_email, v.contact_phone AS vendor_phone
+           FROM routines r JOIN vendors v ON v.id = r.vendor_id WHERE r.id = ?`,
+          visit.routine_id)
+      : Promise.resolve(null),
+    visit.vendor_id ? first<Vendor>(db, 'SELECT * FROM vendors WHERE id = ?', visit.vendor_id) : Promise.resolve(null),
     all<VisitBundle['recs'][number]>(
       db,
       `SELECT rec.*, cb.full_name AS created_by_name, rb.full_name AS reviewed_by_name, aa.full_name AS action_assigned_name
@@ -219,8 +320,22 @@ async function loadVisit(c: Context<App>, id: string): Promise<VisitBundle | nul
     first<User>(db, 'SELECT * FROM users WHERE id = ?', visit.maintenance_engineer_id),
     first<User>(db, 'SELECT * FROM users WHERE id = ?', visit.technical_engineer_id),
   ]);
-  if (!routine) return null;
-  return { visit, routine, recs, reports, tasks, comments, team: { coordinator, maintEngineer, techEngineer } };
+  if (!routine && !adhocVendor) return null;
+  const meta: VisitBundle['meta'] = routine
+    ? {
+        plan_number: routine.plan_number, description: routine.description,
+        requires_technical_review: visit.requires_technical_review ?? routine.requires_technical_review, is_adhoc: false,
+        vendor_id: routine.vendor_id, vendor_name: routine.vendor_name, vendor_contact: routine.vendor_contact,
+        vendor_email: routine.vendor_email, vendor_phone: routine.vendor_phone,
+      }
+    : {
+        plan_number: visit.notification_number ? `Ad-hoc ${visit.notification_number}` : 'Ad-hoc',
+        description: visit.description ?? 'Ad-hoc visit',
+        requires_technical_review: visit.requires_technical_review ?? 1, is_adhoc: true,
+        vendor_id: adhocVendor!.id, vendor_name: adhocVendor!.name, vendor_contact: adhocVendor!.contact_name,
+        vendor_email: adhocVendor!.contact_email, vendor_phone: adhocVendor!.contact_phone,
+      };
+  return { visit, meta, recs, reports, tasks, comments, team: { coordinator, maintEngineer, techEngineer } };
 }
 
 /** Guard for action endpoints: loads the bundle and bails with a flash on failure. */
@@ -257,7 +372,7 @@ async function withVisit(
   return c.redirect(back);
 }
 
-const perms = (c: Context<App>, b: VisitBundle) => visitPerms(c.get('user'), b.visit, b.reports.length, b.recs);
+const perms = (c: Context<App>, b: VisitBundle) => visitPerms(c.get('user'), b.visit, b.reports.length, b.recs, b.tasks);
 const actor = (c: Context<App>) => c.get('realUser').id;
 
 // ---------- Actions ----------
@@ -265,10 +380,12 @@ const actor = (c: Context<App>) => c.get('realUser').id;
 routes.post('/:id/confirm-date', async (c) => {
   const form = await c.req.formData();
   const date = String(form.get('confirmed_date') ?? '');
+  const endDate = String(form.get('end_date') ?? '').trim();
   return withVisit(c, (b) => perms(c, b).canConfirmDate, async (b) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Pick a valid date.');
+    if (endDate && (!/^\d{4}-\d{2}-\d{2}$/.test(endDate) || endDate < date)) throw new Error('The end date must be on or after the confirmed date.');
     await updateRow(c.env.DB, 'visits', b.visit.id, {
-      confirmed_date: date, confirmed_at: now(), status: 'date_confirmed' satisfies VisitStatus,
+      confirmed_date: date, end_date: endDate || null, confirmed_at: now(), status: 'date_confirmed' satisfies VisitStatus,
     }, actor(c));
     await completeOpenTasks(c.env.DB, b.visit.id, 'confirm_visit_date', actor(c));
     // Next step in the chain: the report is due report_upload_weeks after the visit.
@@ -329,18 +446,34 @@ routes.post('/:id/reports', async (c) => {
   const form = await c.req.formData();
   const file = form.get('file') as File | string | null;
   const notes = String(form.get('notes') ?? '').trim();
-  return withVisit(c, (b) => perms(c, b).canUploadReport, (b) => storeReport(c, b, file, notes, null));
+  const replacesId = String(form.get('replaces_id') ?? '').trim();
+  return withVisit(c, (b) => perms(c, b).canUploadReport, async (b) => {
+    let replaces: string | null = null;
+    if (replacesId) {
+      const target = b.reports.find((r) => r.id === replacesId);
+      if (!target) throw new Error('The report to replace no longer exists.');
+      replaces = target.id;
+    }
+    return storeReport(c, b, file, notes, replaces);
+  });
 });
 
-routes.post('/:id/reports/:reportId/replace', async (c) => {
-  const form = await c.req.formData();
-  const file = form.get('file') as File | string | null;
-  const notes = String(form.get('notes') ?? '').trim();
-  return withVisit(c, (b) => perms(c, b).canUploadReport, async (b) => {
-    const old = b.reports.find((r) => r.id === c.req.param('reportId'));
-    if (!old) throw new Error('Report not found.');
-    return storeReport(c, b, file, notes, old.id);
-  });
+// The ME (or an admin) confirms the latest report raises nothing new - closes
+// the pending recommendations check so the visit can be closed again.
+routes.post('/:id/recommendations-check', async (c) => {
+  return withVisit(
+    c,
+    (b) => {
+      const p = perms(c, b);
+      return p.isMaintEngineer || p.isAdmin;
+    },
+    async (b) => {
+      await completeOpenTasks(c.env.DB, b.visit.id, 'create_recommendations', actor(c));
+      const fresh = (await first<Visit>(c.env.DB, 'SELECT * FROM visits WHERE id = ?', b.visit.id))!;
+      await maybeCreateCloseTask(c.env.DB, fresh, actor(c));
+      return 'Confirmed - no further recommendations needed.';
+    }
+  );
 });
 
 // Answering "yes" to the more-recommendations prompt: rewind the workflow to
@@ -426,7 +559,7 @@ routes.post('/:id/recommendations', async (c) => {
   return withVisit(c, (b) => perms(c, b).canCreateRec, async (b) => {
     if (!description) throw new Error('A description is required.');
     const db = c.env.DB;
-    const requiresReview = !!b.routine.requires_technical_review;
+    const requiresReview = !!b.meta.requires_technical_review;
     await insertRow(db, 'recommendations', {
       visit_id: b.visit.id, description,
       sap_notification_number: !requiresReview && sap ? sap : null,
@@ -902,7 +1035,7 @@ routes.get('/:id', async (c) => {
       </EmptyState>
     ));
   }
-  const { visit, routine, recs, reports, comments, team } = bundle;
+  const { visit, meta, recs, reports, comments, team } = bundle;
   const p = perms(c, bundle);
   const user = c.get('user');
   const users = (p.canReassign || p.canReview) ? await activeUsers(c.env.DB) : [];
@@ -931,11 +1064,11 @@ routes.get('/:id', async (c) => {
   const sapMissing = (rec: Rec) => rec.review_decision === 'request_sap' && !rec.sap_notification_number;
   const replacedIds = new Set(reports.map((r) => r.replaces_id).filter(Boolean));
 
-  return page(c, `Visit ${routine.plan_number}`, (
+  return page(c, `Visit ${meta.plan_number}`, (
     <>
       <PageHeader
-        title={<>{routine.plan_number} - <a href={`/vendors/${routine.vendor_id}`}>{routine.vendor_name}</a></>}
-        sub={routine.description}
+        title={<>{meta.plan_number} - <a href={`/vendors/${meta.vendor_id}`}>{meta.vendor_name}</a></>}
+        sub={meta.description}
       >
         <a class="btn" href="/visits">← All visits</a>
       </PageHeader>
@@ -961,6 +1094,17 @@ routes.get('/:id', async (c) => {
               All recommendations are resolved - this visit is ready to close.
               <ActionButton action={`/visits/${visit.id}/close`} label="Close Visit" class="btn btn--sm btn--green"
                 confirm="Close this visit? All recommendations are resolved." busy="Closing…" />
+            </div>
+          ) : p.pendingRecsCheck && p.isOpen ? (
+            <div class="waiting">
+              Waiting for <strong>{team.maintEngineer?.full_name ?? 'the maintenance engineer'}</strong> to add
+              recommendations from the latest report, or confirm none are needed.
+              {(p.isMaintEngineer || p.isAdmin) && (
+                <span style="margin-left:0.75rem">
+                  <ActionButton action={`/visits/${visit.id}/recommendations-check`} label="No further recommendations"
+                    class="btn btn--sm" confirm="Confirm the latest report raises no new recommendations?" busy="Confirming…" />
+                </span>
+              )}
             </div>
           ) : (
             waiting && <div class="waiting">Waiting for <strong>{waiting}</strong></div>
@@ -996,16 +1140,16 @@ routes.get('/:id', async (c) => {
         <Card title="Visit Information">
           <dl class="kv">
             <div><dt>Status</dt><dd>{visitBadge(visit.status)}</dd></div>
-            <div><dt>Scheduled Date</dt><dd>{fmtDate(visit.scheduled_date)}</dd></div>
-            <div><dt>Confirmed Date</dt><dd>{fmtDate(visit.confirmed_date)}</dd></div>
+            <div><dt>Scheduled Date{visit.end_date ? 's' : ''}</dt><dd>{fmtRange(visit.scheduled_date, visit.end_date)}</dd></div>
+            <div><dt>Confirmed Date{visit.end_date && visit.confirmed_date ? 's' : ''}</dt><dd>{visit.confirmed_date ? fmtRange(visit.confirmed_date, visit.end_date) : '-'}</dd></div>
             <div>
               <dt>Vendor Contact</dt>
               <dd>
-                {routine.vendor_contact && <>{routine.vendor_contact}<br /></>}
-                {routine.vendor_email ? <a href={`mailto:${routine.vendor_email}`}>{routine.vendor_email}</a> : null}
-                {routine.vendor_email && routine.vendor_phone ? <br /> : null}
-                {routine.vendor_phone ? <a href={`tel:${routine.vendor_phone}`}>{routine.vendor_phone}</a> : null}
-                {!routine.vendor_contact && !routine.vendor_email && !routine.vendor_phone && '-'}
+                {meta.vendor_contact && <>{meta.vendor_contact}<br /></>}
+                {meta.vendor_email ? <a href={`mailto:${meta.vendor_email}`}>{meta.vendor_email}</a> : null}
+                {meta.vendor_email && meta.vendor_phone ? <br /> : null}
+                {meta.vendor_phone ? <a href={`tel:${meta.vendor_phone}`}>{meta.vendor_phone}</a> : null}
+                {!meta.vendor_contact && !meta.vendor_email && !meta.vendor_phone && '-'}
               </dd>
             </div>
             <div>
@@ -1034,9 +1178,6 @@ routes.get('/:id', async (c) => {
                 <span class="btn-row mt" style="margin-top:0.4rem">
                   <a class="btn btn--sm btn--icon" href={`/visits/${visit.id}/reports/${r.id}/view`} target="_blank" title="View in browser" aria-label="View report in browser"><Icon name="eye" size={15} /></a>
                   <a class="btn btn--sm btn--icon" href={`/visits/${visit.id}/reports/${r.id}/download`} title="Download report" aria-label="Download report"><Icon name="download" size={15} /></a>
-                  {p.canUploadReport && !isReplaced && (
-                    <IconModalBtn modal={`replace-report-${r.id}`} icon="rotate" label="Replace report (keeps this version)" />
-                  )}
                   {p.isAdmin && (
                     <IconAction action={`/visits/${visit.id}/reports/${r.id}/delete`} icon="trash" label="Delete report"
                       class="btn--danger" confirm={`Delete report "${r.file_name}"?`} />
@@ -1100,7 +1241,7 @@ routes.get('/:id', async (c) => {
                       {!['completed', 'cancelled'].includes(rec.status) && canEditRec && (
                         <IconModalBtn modal={`edit-rec-${rec.id}`} icon="edit" label="Edit recommendation" />
                       )}
-                      {rec.status === 'open' && !rec.sent_for_review && canManageRec && routine.requires_technical_review && (
+                      {rec.status === 'open' && !rec.sent_for_review && canManageRec && meta.requires_technical_review && (
                         <IconAction action={`/visits/${visit.id}/recommendations/${rec.id}/send-review`} icon="send" label="Send for review" />
                       )}
                       {rec.status === 'in_review' && p.canReview && (
@@ -1187,21 +1328,6 @@ routes.get('/:id', async (c) => {
         </Modal>
       )}
 
-      {p.canUploadReport && reports.filter((r) => !replacedIds.has(r.id)).map((r) => (
-        <Modal id={`replace-report-${r.id}`} title={`Replace: ${r.file_name}`}>
-          <form method="post" action={`/visits/${visit.id}/reports/${r.id}/replace`} enctype="multipart/form-data">
-            <p class="muted">The current file is kept and marked as replaced; the new file becomes the live version.</p>
-            <Field label="New file" hint="PDF, Word or Excel, up to 10 MB.">
-              <input type="file" name="file" required accept=".pdf,.doc,.docx,.xls,.xlsx" />
-            </Field>
-            <Field label="Notes (optional)">
-              <textarea name="notes" rows={2} placeholder="What changed in this version…"></textarea>
-            </Field>
-            <ModalButtons submit="Replace Report" busy="Uploading…" />
-          </form>
-        </Modal>
-      ))}
-
       {p.canClose && c.req.query('prompt-close') === '1' && (
         <Modal id="prompt-close" title="Close this visit?" autoOpen>
           <div class="modal__content">
@@ -1217,15 +1343,30 @@ routes.get('/:id', async (c) => {
       <Modal id="confirm-date" title="Confirm Visit Date">
         <form method="post" action={`/visits/${visit.id}/confirm-date`}>
           <div class="context">Scheduled for <strong>{fmtDate(visit.scheduled_date)}</strong>. Confirm the date agreed with the vendor.</div>
-          <Field label="Confirmed date">
-            <input type="date" name="confirmed_date" required value={visit.confirmed_date ?? visit.scheduled_date} />
-          </Field>
+          <div class="form-grid">
+            <Field label="Confirmed date">
+              <input type="date" name="confirmed_date" required value={visit.confirmed_date ?? visit.scheduled_date} />
+            </Field>
+            <Field label="End date (optional)" hint="For visits spanning several days.">
+              <input type="date" name="end_date" value={visit.end_date ?? ''} />
+            </Field>
+          </div>
           <ModalButtons submit="Confirm Date" />
         </form>
       </Modal>
 
-      <Modal id="upload-report" title={reports.length > 0 ? 'Upload Additional Report' : 'Upload Maintenance Report'}>
+      <Modal id="upload-report" title={reports.length > 0 ? 'Add Report' : 'Upload Maintenance Report'}>
         <form method="post" action={`/visits/${visit.id}/reports`} enctype="multipart/form-data">
+          {reports.filter((r) => !replacedIds.has(r.id)).length > 0 && (
+            <Field label="Add as" hint="Replacing keeps the old file, marked as replaced.">
+              <select name="replaces_id">
+                <option value="">Additional report</option>
+                {reports.filter((r) => !replacedIds.has(r.id)).map((r) => (
+                  <option value={r.id}>Replacement for: {r.file_name}</option>
+                ))}
+              </select>
+            </Field>
+          )}
           <Field label="Report file" hint="PDF, Word or Excel, up to 10 MB.">
             <input type="file" name="file" required accept=".pdf,.doc,.docx,.xls,.xlsx" />
           </Field>
@@ -1248,19 +1389,19 @@ routes.get('/:id', async (c) => {
 
       <Modal id="add-rec" title="Add Recommendation">
         <form method="post" action={`/visits/${visit.id}/recommendations`}>
-          {routine.requires_technical_review ? (
-            <div class="note">This routine requires technical review - the recommendation will be sent to {team.techEngineer?.full_name ?? 'the technical engineer'} automatically.</div>
+          {meta.requires_technical_review ? (
+            <div class="note">Recommendations require technical review - this one will be sent to {team.techEngineer?.full_name ?? 'the technical engineer'} automatically.</div>
           ) : null}
           <Field label="Description">
             <textarea name="description" rows={4} required placeholder="Describe the recommendation…"></textarea>
           </Field>
-          {!routine.requires_technical_review && (
+          {!meta.requires_technical_review && (
             <div class="form-grid">
               <Field label="SAP notification # (optional)"><input name="sap_notification_number" /></Field>
               <Field label="Due date (optional)"><input type="date" name="due_date" /></Field>
             </div>
           )}
-          <ModalButtons submit={routine.requires_technical_review ? 'Create & Send for Review' : 'Create Recommendation'} />
+          <ModalButtons submit={meta.requires_technical_review ? 'Create & Send for Review' : 'Create Recommendation'} />
         </form>
       </Modal>
 

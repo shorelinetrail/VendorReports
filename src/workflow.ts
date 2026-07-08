@@ -180,6 +180,7 @@ export interface VisitPerms {
   isOpen: boolean;
   hasReports: boolean;
   allRecsDone: boolean;
+  pendingRecsCheck: boolean;
   canConfirmDate: boolean;
   canUploadReport: boolean;
   canCreateRec: boolean;
@@ -191,13 +192,18 @@ export interface VisitPerms {
   canReassign: boolean;
 }
 
-export function visitPerms(user: User, visit: Visit, reportCount: number, recs: Recommendation[]): VisitPerms {
+export function visitPerms(user: User, visit: Visit, reportCount: number, recs: Recommendation[], tasks: Task[] = []): VisitPerms {
   const isAdmin = isAdminUser(user);
   const isCoordinator = user.id === visit.vendor_coordinator_id;
   const isMaintEngineer = user.id === visit.maintenance_engineer_id;
   const isTechEngineer = user.id === visit.technical_engineer_id;
   const isOpen = visit.status !== 'completed' && visit.status !== 'cancelled';
   const hasReports = reportCount > 0 || !!visit.no_report_reason;
+  // An open create-recommendations task means a report is awaiting the ME's
+  // judgement (add recommendations or confirm none) - the visit isn't ready
+  // to close until that's answered.
+  const pendingRecsCheck = tasks.some((t) =>
+    t.task_type === 'create_recommendations' && ['pending', 'in_progress', 'overdue'].includes(t.status));
   const allRecsDone = recs.length > 0 && recs.every((r) => r.status === 'completed' || r.status === 'cancelled');
 
   return {
@@ -211,7 +217,8 @@ export function visitPerms(user: User, visit: Visit, reportCount: number, recs: 
     canReview: isTechEngineer || isAdmin,
     canReschedule: (isCoordinator || isAdmin) && isOpen,
     canCancel: (isCoordinator || isAdmin) && isOpen,
-    canClose: (isMaintEngineer || isAdmin) && isOpen && allRecsDone,
+    canClose: (isMaintEngineer || isAdmin) && isOpen && allRecsDone && !pendingRecsCheck,
+    pendingRecsCheck,
     // The assigned team (or an admin) may reopen completed AND cancelled
     // visits; it's audited, so who reopened is always on record.
     canReopen: (isCoordinator || isMaintEngineer || isTechEngineer || isAdmin) &&
