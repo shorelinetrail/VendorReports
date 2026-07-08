@@ -275,6 +275,50 @@ Workflow refinements added after hands-on review of the finished rebuild:
   completed task chain. Migrations `0002`-`0009` are pending for any remote
   deploy.
 
+### Fourth wave (2026-07-08): forensic workflow audit
+
+A systematic audit (119 scripted end-to-end checks against an isolated
+instance, now committed as `tests/e2e/`, plus static route/permission
+cross-checks) found and fixed:
+
+**Workflow dead ends**
+- Manually created visits seeded no confirm task (generator and ad-hoc did);
+  now every new visit gets one, with due dates inside the confirmation window
+  clamped to today instead of the task being skipped entirely.
+- Reschedule only cancelled the first three task types, leaving live
+  review/respond/close tasks pointing at a visit that showed "Scheduled";
+  it now cancels every open task and also clears `end_date` (previously a
+  rescheduled multi-day visit could show an end date before its start).
+- Team reassignment moved assigned-action respond tasks to the new technical
+  engineer while the recommendation still awaited the original assignee -
+  the task could then never complete. Respond tasks now stay with the
+  recommendation's assignee.
+- `more-recommendations` accepted POSTs on cancelled visits, seeding an open
+  task on a dead visit.
+
+**Early reports made "allowed but honest"**
+- A report uploaded while the visit was still `scheduled` used to be stored
+  without advancing the workflow or seeding the recs check (while "no report"
+  jumped ahead) - and the stepper then claimed the date had been confirmed.
+  Both paths now advance to `report_uploaded`, cancel the stale confirm task
+  and seed the recs check; the stepper shows "Date Confirmed (skipped)" when
+  `confirmed_date` is null. Deleting the last report rewinds to the correct
+  stage; no-report is restricted to pre-report stages.
+
+**Server checks tightened to match the UI** (previously reachable via stale
+pages/crafted POSTs): send-review now requires the plan's technical-review
+flag; SAP details can no longer be edited onto resolved recommendations;
+recommendations-check requires an actual pending check on an open visit; the
+cross-visit Recommendations page no longer shows a review button to
+technical engineers not assigned to the visit (it always failed server-side).
+
+**Cleanup**: removed the unreachable `in_progress` task state (a leftover of
+removing the task-list shortcuts) and the unused `allRecsDone` perm flag;
+assigned-action responses now display their timestamp; duplicate-visit
+creation reports real errors instead of blaming every failure on a
+duplicate; the dashboard stat counts all active recommendations (open +
+in review + approved) and is labelled accordingly.
+
 ## Known limitations
 
 - No email/notification delivery (same as the old app — the in-app

@@ -16,9 +16,15 @@ Cloudflare Workers in 2026-07, then ported off Workers to Node + PostgreSQL
 ```bash
 npm run dev            # node --watch + tsx at http://localhost:8788 (restarts on TS/JSX changes)
 npm run start          # same server without the watcher
-npm run typecheck      # tsc --noEmit - the fastest full check; there is no test suite
+npm run typecheck      # tsc --noEmit - the fastest full check
 npm run db:migrate     # create the database if needed + apply migrations/ (tracked in schema_migrations)
 ```
+
+End-to-end suite: `tests/e2e/run.sh` (bash) - 119 curl+psql checks covering
+every workflow transition, permission denial and invariant. It needs a
+throwaway instance (empty `vendortrak_test` DB + server on :8790 with
+`FILES_DIR=data/test-reports`); the run.sh header has the exact commands.
+Run it after any workflow/permission change; add a check with every fix.
 
 Config via env vars, all defaulted for local dev (`src/env.ts`):
 `DATABASE_URL` (postgres://postgres:postgres@localhost:5432/vendortrak),
@@ -102,7 +108,22 @@ state; reschedule resets to scheduled.
 - **Task chain**: every stage seeds the next task (confirm → upload_report due
   confirmed+`report_upload_weeks`; report/no-report → create_recommendations
   due +`recommendations_review_days`; send-for-review → technical_review;
-  ready-to-close → close_visit). Deadlines come from `system_config`.
+  ready-to-close → close_visit). Deadlines come from `system_config`. EVERY
+  new visit (generated, manual, ad-hoc) seeds a confirm task - due dates
+  inside the confirmation window clamp to today rather than skipping the task.
+- **Early reports are allowed but honest**: a report (or no-report) arriving
+  while the visit is still `scheduled` advances it to `report_uploaded`,
+  cancels the stale confirm task and seeds the recs check - and the stepper
+  shows "Date Confirmed (skipped)" (dashed dot) since `confirmed_date` stays
+  null. Deleting the last report rewinds to `date_confirmed` or `scheduled`
+  depending on whether the date was ever confirmed. no-report is only valid
+  pre-report (`scheduled`/`date_confirmed`, no existing reason).
+- **Reschedule cancels ALL open tasks** (incl. review/respond/close from
+  deeper stages) and clears `end_date`, then reseeds the confirm task. In-review
+  recommendations stay reviewable from the visit page.
+- **Team reassign moves open tasks EXCEPT respond tasks**
+  (review_recommendations) - those follow the recommendation's
+  `action_assigned_to_id`, which reassignment does not change.
 - **Visits** are routine-generated OR **ad-hoc** (`routine_id` NULL; vendor,
   description, `requires_technical_review` and a required notification number
   live on the visit; anyone can create one). Every visit query app-wide uses
