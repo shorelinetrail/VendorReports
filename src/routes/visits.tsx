@@ -43,7 +43,7 @@ routes.get('/', async (c) => {
     params.push(statusFilter);
   }
   if (q) {
-    where.push('(r.plan_number LIKE ? OR ve.name LIKE ? OR ve.vendor_number LIKE ? OR COALESCE(r.description, v.description) LIKE ? OR v.notification_number LIKE ?)');
+    where.push('(r.plan_number ILIKE ? OR ve.name ILIKE ? OR ve.vendor_number ILIKE ? OR COALESCE(r.description, v.description) ILIKE ? OR v.notification_number ILIKE ?)');
     params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
   }
   if (mine) {

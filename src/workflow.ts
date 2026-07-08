@@ -1,4 +1,4 @@
-import { all, first, run, insertRow, updateRow, now } from './db';
+import { all, first, run, insertRow, updateRow, now, type Db } from './db';
 import { addDays, addMonths, todayStr } from './dates';
 import {
   isAdmin as isAdminUser,
@@ -17,7 +17,7 @@ export const CONFIG_DEFAULTS = {
 export type ConfigKey = keyof typeof CONFIG_DEFAULTS;
 export type Config = Record<ConfigKey, number>;
 
-export async function getConfig(db: D1Database): Promise<Config> {
+export async function getConfig(db: Db): Promise<Config> {
   const rows = await all<{ config_key: string; config_value: string }>(db, 'SELECT config_key, config_value FROM system_config');
   const cfg = { ...CONFIG_DEFAULTS } as Config;
   for (const row of rows) {
@@ -30,7 +30,7 @@ export async function getConfig(db: D1Database): Promise<Config> {
 }
 
 /** Validates (whole number 1–365, matching the old DB trigger) and saves one config value. */
-export async function setConfigValue(db: D1Database, key: ConfigKey, value: string, actorId: string | null) {
+export async function setConfigValue(db: Db, key: ConfigKey, value: string, actorId: string | null) {
   if (!/^\d+$/.test(value.trim()) || +value < 1 || +value > 365) {
     throw new Error(`"${key}" must be a whole number between 1 and 365`);
   }
@@ -57,7 +57,7 @@ export async function setConfigValue(db: D1Database, key: ConfigKey, value: stri
  * missing visits (deduped on routine+date), and seeds the confirm-date task
  * when its due date is still in the future.
  */
-export async function generateVisits(db: D1Database): Promise<{ created: string[]; errors: string[] }> {
+export async function generateVisits(db: Db): Promise<{ created: string[]; errors: string[] }> {
   const routines = await all<Routine>(db, 'SELECT * FROM routines WHERE is_active = 1');
   const cfg = await getConfig(db);
   const today = todayStr();
@@ -105,7 +105,7 @@ export async function generateVisits(db: D1Database): Promise<{ created: string[
  * Self-heal: any open visit that is ready to close but has no close_visit task
  * gets one. Covers historical data and any transition path that missed seeding.
  */
-export async function sweepCloseTasks(db: D1Database): Promise<void> {
+export async function sweepCloseTasks(db: Db): Promise<void> {
   const candidates = await all<Visit>(
     db, `SELECT * FROM visits WHERE status IN ('report_uploaded', 'recommendations_created', 'in_review')`);
   for (const visit of candidates) await maybeCreateCloseTask(db, visit, null);
@@ -114,7 +114,7 @@ export async function sweepCloseTasks(db: D1Database): Promise<void> {
 // ---- Task expiry (daily cron + manual admin trigger) ----
 
 /** Flips past-due pending/in-progress tasks to 'overdue'. Returns how many changed. */
-export async function expireTasks(db: D1Database): Promise<number> {
+export async function expireTasks(db: Db): Promise<number> {
   const due = await all<{ id: string }>(
     db, "SELECT id FROM tasks WHERE due_date < ? AND status IN ('pending', 'in_progress')", todayStr());
   for (const t of due) await updateRow(db, 'tasks', t.id, { status: 'overdue' }, null);
@@ -124,7 +124,7 @@ export async function expireTasks(db: D1Database): Promise<number> {
 // ---- Task helpers used by visit transitions ----
 
 export async function createTask(
-  db: D1Database,
+  db: Db,
   visitId: string,
   type: TaskType,
   assignedToId: string,
@@ -142,7 +142,7 @@ const OPEN_TASK_STATUSES = "('pending', 'in_progress', 'overdue')";
 
 /** Creates a task unless one of the same type is already open on the visit. */
 export async function createTaskOnce(
-  db: D1Database,
+  db: Db,
   visitId: string,
   type: TaskType,
   assignedToId: string,
@@ -156,7 +156,7 @@ export async function createTaskOnce(
 }
 
 /** Marks open tasks of a type on a visit as completed (optionally only those assigned to one user). */
-export async function completeOpenTasks(db: D1Database, visitId: string, type: TaskType, actorId: string | null, assignedToId?: string) {
+export async function completeOpenTasks(db: Db, visitId: string, type: TaskType, actorId: string | null, assignedToId?: string) {
   const rows = await all<{ id: string }>(
     db,
     `SELECT id FROM tasks WHERE visit_id = ? AND task_type = ? AND status IN ${OPEN_TASK_STATUSES}` +
@@ -166,7 +166,7 @@ export async function completeOpenTasks(db: D1Database, visitId: string, type: T
   for (const t of rows) await updateRow(db, 'tasks', t.id, { status: 'completed', completed_at: now() }, actorId);
 }
 
-export async function cancelOpenTasks(db: D1Database, visitId: string, type: TaskType, actorId: string | null) {
+export async function cancelOpenTasks(db: Db, visitId: string, type: TaskType, actorId: string | null) {
   const rows = await all<{ id: string }>(
     db, `SELECT id FROM tasks WHERE visit_id = ? AND task_type = ? AND status IN ${OPEN_TASK_STATUSES}`, visitId, type);
   for (const t of rows) await updateRow(db, 'tasks', t.id, { status: 'cancelled' }, actorId);
@@ -181,7 +181,7 @@ export const POST_REPORT_STAGES: VisitStatus[] = ['report_uploaded', 'recommenda
  * resolved (a visit with zero recommendations counts, provided the ME has no
  * open create-recommendations check outstanding).
  */
-export async function maybeCreateCloseTask(db: D1Database, visit: Visit, actorId: string | null) {
+export async function maybeCreateCloseTask(db: Db, visit: Visit, actorId: string | null) {
   if (!POST_REPORT_STAGES.includes(visit.status)) return;
   const recs = await all<Recommendation>(db, 'SELECT * FROM recommendations WHERE visit_id = ?', visit.id);
   if (!recs.every((r) => r.status === 'completed' || r.status === 'cancelled')) return;

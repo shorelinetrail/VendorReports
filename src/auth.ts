@@ -1,7 +1,7 @@
 import { createMiddleware } from 'hono/factory';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { Context } from 'hono';
-import { all, first, run, now } from './db';
+import { all, first, run, now, type Db } from './db';
 import { isAdmin, type App, type User, type UserRole } from './types';
 
 const SESSION_COOKIE = 'vt_session';
@@ -20,7 +20,7 @@ async function sha256hex(s: string): Promise<string> {
 async function pbkdf2(password: string, salt: Uint8Array, iterations: number): Promise<string> {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', salt: salt as BufferSource, iterations },
+    { name: 'PBKDF2', hash: 'SHA-256', salt: salt.buffer as ArrayBuffer, iterations },
     key,
     256
   );
@@ -45,7 +45,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
   return diff === 0;
 }
 
-export async function createSession(db: D1Database, userId: string): Promise<string> {
+export async function createSession(db: Db, userId: string): Promise<string> {
   const token = hex(crypto.getRandomValues(new Uint8Array(32)));
   const expires = new Date(Date.now() + SESSION_DAYS * 86400_000).toISOString();
   await run(db, 'INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)',
@@ -63,18 +63,18 @@ export function setSessionCookie(c: Context, token: string) {
   });
 }
 
-export async function destroySession(c: Context, db: D1Database) {
+export async function destroySession(c: Context, db: Db) {
   const token = getCookie(c, SESSION_COOKIE);
   if (token) await run(db, 'DELETE FROM sessions WHERE token_hash = ?', await sha256hex(token));
   deleteCookie(c, SESSION_COOKIE, { path: '/' });
 }
 
-export async function setImpersonation(db: D1Database, tokenHash: string, targetId: string | null) {
+export async function setImpersonation(db: Db, tokenHash: string, targetId: string | null) {
   await run(db, 'UPDATE sessions SET impersonating_id = ? WHERE token_hash = ?', targetId, tokenHash);
 }
 
 /** True when the users table is empty, i.e. first-run setup is needed. */
-export async function needsSetup(db: D1Database): Promise<boolean> {
+export async function needsSetup(db: Db): Promise<boolean> {
   const row = await first<{ n: number }>(db, 'SELECT COUNT(*) AS n FROM users');
   return !row || row.n === 0;
 }
@@ -125,11 +125,11 @@ export const requireRole = (...roles: UserRole[]) =>
     return c.text('Forbidden', 403);
   });
 
-export async function findUserByEmail(db: D1Database, email: string): Promise<User | null> {
-  return first<User>(db, 'SELECT * FROM users WHERE email = ? COLLATE NOCASE', email.trim());
+export async function findUserByEmail(db: Db, email: string): Promise<User | null> {
+  return first<User>(db, 'SELECT * FROM users WHERE lower(email) = lower(?)', email.trim());
 }
 
-export async function activeUsers(db: D1Database): Promise<User[]> {
+export async function activeUsers(db: Db): Promise<User[]> {
   return all<User>(db, 'SELECT * FROM users WHERE is_active = 1 ORDER BY full_name');
 }
 

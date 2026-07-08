@@ -1,18 +1,27 @@
--- VendorTrak schema (D1 / SQLite).
--- Conventions: TEXT uuids (crypto.randomUUID), dates as 'YYYY-MM-DD',
--- timestamps as ISO-8601 UTC strings, booleans as INTEGER 0/1.
--- updated_at is maintained by the app's data layer, which also writes audit_log.
+-- VendorTrak schema (PostgreSQL).
+-- Conventions carried over from the SQLite version so app logic is unchanged:
+-- TEXT uuids (crypto.randomUUID), dates as 'YYYY-MM-DD' strings, timestamps as
+-- ISO-8601 UTC strings, booleans as INTEGER 0/1. String comparison IS date
+-- comparison. updated_at is maintained by the app's data layer, which also
+-- writes audit_log.
+--
+-- This file consolidates SQLite migrations 0001-0009 (see git history on the
+-- fable-version branch before the PostgreSQL port).
 
 CREATE TABLE users (
   id TEXT PRIMARY KEY,
-  email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  email TEXT NOT NULL,
   full_name TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('admin', 'vendor_coordinator', 'maintenance_engineer', 'technical_engineer')),
+  -- Admin rights on top of a functional role (the 'admin' role implies it).
+  is_admin INTEGER NOT NULL DEFAULT 0,
   password_hash TEXT NOT NULL,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+-- Case-insensitive uniqueness (was COLLATE NOCASE in SQLite); lookups use lower(email).
+CREATE UNIQUE INDEX idx_users_email_lower ON users (lower(email));
 
 CREATE TABLE sessions (
   token_hash TEXT PRIMARY KEY,
@@ -27,6 +36,9 @@ CREATE INDEX idx_sessions_user ON sessions(user_id);
 CREATE TABLE vendors (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
+  -- External vendor reference (e.g. the SAP vendor number). Optional, unique when set.
+  vendor_number TEXT,
+  contact_name TEXT,
   contact_email TEXT,
   contact_phone TEXT,
   address TEXT,
@@ -34,6 +46,7 @@ CREATE TABLE vendors (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE UNIQUE INDEX idx_vendors_number ON vendors(vendor_number);
 
 CREATE TABLE routines (
   id TEXT PRIMARY KEY,
@@ -55,8 +68,12 @@ CREATE INDEX idx_routines_vendor ON routines(vendor_id);
 
 CREATE TABLE visits (
   id TEXT PRIMARY KEY,
-  routine_id TEXT NOT NULL REFERENCES routines(id) ON DELETE CASCADE,
+  routine_id TEXT REFERENCES routines(id) ON DELETE CASCADE,  -- NULL = ad-hoc visit
+  vendor_id TEXT REFERENCES vendors(id),                      -- set on ad-hoc visits
+  description TEXT,                                           -- ad-hoc visits
+  requires_technical_review INTEGER,                          -- ad-hoc visits; NULL = inherit from routine
   scheduled_date TEXT NOT NULL,
+  end_date TEXT,                                              -- last day, when the visit spans multiple days
   confirmed_date TEXT,
   confirmed_at TEXT,
   notification_number TEXT,
@@ -71,12 +88,16 @@ CREATE TABLE visits (
   rescheduled_at TEXT,
   rescheduled_from TEXT,
   completed_at TEXT,
+  cancelled_at TEXT,
+  cancellation_reason TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  UNIQUE (routine_id, scheduled_date)
+  CHECK (routine_id IS NOT NULL OR vendor_id IS NOT NULL)
 );
 CREATE INDEX idx_visits_status ON visits(status);
 CREATE INDEX idx_visits_scheduled ON visits(scheduled_date);
+-- Generator dedupe; multiple NULL routine_ids (ad-hoc) are allowed.
+CREATE UNIQUE INDEX idx_visits_routine_date ON visits(routine_id, scheduled_date);
 
 CREATE TABLE tasks (
   id TEXT PRIMARY KEY,
@@ -111,6 +132,9 @@ CREATE TABLE recommendations (
   review_decision TEXT CHECK (review_decision IN ('no_action', 'request_sap', 'other_action')),
   review_action_description TEXT,
   action_assigned_to_id TEXT REFERENCES users(id),
+  -- When a review assigns an action, the assignee must respond before completion.
+  action_response TEXT,
+  action_responded_at TEXT,
   reviewed_by_id TEXT REFERENCES users(id),
   reviewed_at TEXT,
   completed_at TEXT,
@@ -125,15 +149,27 @@ CREATE INDEX idx_recs_status ON recommendations(status);
 CREATE TABLE visit_reports (
   id TEXT PRIMARY KEY,
   visit_id TEXT NOT NULL REFERENCES visits(id) ON DELETE CASCADE,
-  file_key TEXT NOT NULL,          -- R2 object key: <visit_id>/<timestamp>-<safe_name>
+  file_key TEXT NOT NULL,          -- storage key: <visit_id>/<timestamp>-<safe_name>
   file_name TEXT NOT NULL,
   file_size INTEGER NOT NULL DEFAULT 0,
   content_type TEXT,
   uploaded_by_id TEXT NOT NULL REFERENCES users(id),
   uploaded_at TEXT NOT NULL,
-  notes TEXT
+  notes TEXT,
+  -- Set when this report supersedes an older one (which is kept).
+  replaces_id TEXT REFERENCES visit_reports(id)
 );
 CREATE INDEX idx_reports_visit ON visit_reports(visit_id);
+
+-- Free-text coordination notes on a visit ("vendor called, running late").
+CREATE TABLE visit_comments (
+  id TEXT PRIMARY KEY,
+  visit_id TEXT NOT NULL REFERENCES visits(id) ON DELETE CASCADE,
+  author_id TEXT NOT NULL REFERENCES users(id),
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX idx_comments_visit ON visit_comments(visit_id);
 
 CREATE TABLE system_config (
   config_key TEXT PRIMARY KEY,
@@ -149,7 +185,7 @@ INSERT INTO system_config (config_key, config_value, description) VALUES
 
 -- Append-only audit trail, written by the data layer on every mutation.
 CREATE TABLE audit_log (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   table_name TEXT NOT NULL,
   record_id TEXT,
   action TEXT NOT NULL CHECK (action IN ('INSERT', 'UPDATE', 'DELETE')),

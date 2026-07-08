@@ -1,3 +1,5 @@
 node_modules/
+# Local data: report file storage (was the emulated R2 bucket)
+data/
+# Leftover local state from the Cloudflare Workers era
 .wrangler/
-.dev.vars

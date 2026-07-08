@@ -490,7 +490,7 @@ routes.post('/vendors', admin, async (c) => {
       await insertRow(c.env.DB, 'vendors', { ...data, is_active: 1 }, c.get('realUser').id);
       flash(c, `Vendor ${data.name} created.`);
     } catch (err) {
-      flash(c, err instanceof Error && err.message.includes('UNIQUE') ? `Vendor number ${data.vendor_number} is already in use.` : 'Failed to create vendor.', 'err');
+      flash(c, err instanceof Error && err.message.toLowerCase().includes('unique') ? `Vendor number ${data.vendor_number} is already in use.` : 'Failed to create vendor.', 'err');
     }
   }
   return c.redirect('/vendors');
@@ -526,7 +526,7 @@ routes.post('/vendors/import', admin, async (c) => {
       }, c.get('realUser').id);
       ok++;
     } catch (err) {
-      errors.push(`Row ${i + 2}: ${err instanceof Error && err.message.includes('UNIQUE') ? 'duplicate vendor_number' : 'failed'}`);
+      errors.push(`Row ${i + 2}: ${err instanceof Error && err.message.toLowerCase().includes('unique') ? 'duplicate vendor_number' : 'failed'}`);
     }
   }
   flash(c, `Imported ${ok} of ${records.length} vendor(s).${errors.length ? ` ${errors.slice(0, 3).join('; ')}` : ''}`, errors.length ? 'err' : 'ok');
@@ -551,7 +551,7 @@ routes.post('/vendors/:id', admin, async (c) => {
       await updateRow(c.env.DB, 'vendors', c.req.param('id')!, data, c.get('realUser').id);
       flash(c, `Vendor ${data.name} updated.`);
     } catch (err) {
-      flash(c, err instanceof Error && err.message.includes('UNIQUE') ? `Vendor number ${data.vendor_number} is already in use.` : 'Failed to update vendor.', 'err');
+      flash(c, err instanceof Error && err.message.toLowerCase().includes('unique') ? `Vendor number ${data.vendor_number} is already in use.` : 'Failed to update vendor.', 'err');
     }
   }
   return c.redirect(back);

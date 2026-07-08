@@ -1,6 +1,6 @@
 /** /reports - browse & download uploaded report files. /analytics - trends and stats. */
 import { Hono } from 'hono';
-import { all } from '../db';
+import { all, type Db } from '../db';
 import { fmtDate, fmtDateTime, fmtMonth, monthKey, monthStart, todayStr } from '../dates';
 import { csvResponse } from '../csv';
 import { page, Card, PageHeader, EmptyState, StatCard, visitBadge, Icon } from '../ui';
@@ -30,7 +30,7 @@ routes.get('/reports', async (c) => {
   const where: string[] = [];
   const params: unknown[] = [];
   if (q) {
-    where.push('(r.plan_number LIKE ? OR COALESCE(r.description, v.description) LIKE ? OR ve.name LIKE ? OR vr.file_name LIKE ? OR v.notification_number LIKE ?)');
+    where.push('(r.plan_number ILIKE ? OR COALESCE(r.description, v.description) ILIKE ? OR ve.name ILIKE ? OR vr.file_name ILIKE ? OR v.notification_number ILIKE ?)');
     params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
   }
   if (vendor !== 'all') { where.push('ve.id = ?'); params.push(vendor); }
@@ -129,7 +129,7 @@ interface AnalyticsData {
   recs: { status: string; due_date: string | null; created_at: string; completed_at: string | null; vendor_name: string }[];
 }
 
-async function loadAnalytics(db: D1Database, months: number): Promise<AnalyticsData> {
+async function loadAnalytics(db: Db, months: number): Promise<AnalyticsData> {
   const from = monthStart(-(months - 1));
   const [visits, recs] = await Promise.all([
     all<AnalyticsData['visits'][number]>(

@@ -1,5 +1,62 @@
+import { Pool, types } from 'pg';
+
+// COUNT(*)/SUM come back from pg as int8/numeric strings; the app expects numbers.
+types.setTypeParser(types.builtins.INT8, (v) => Number(v));
+types.setTypeParser(types.builtins.NUMERIC, (v) => Number(v));
+
 export const uid = () => crypto.randomUUID();
 export const now = () => new Date().toISOString();
+
+/**
+ * Database handle passed around the app (was a D1Database binding).
+ * Queries keep D1/SQLite-style `?` placeholders; they are rewritten to $n here.
+ */
+export class Db {
+  constructor(private pool: Pool) {}
+  query(sql: string, params: unknown[]) {
+    return this.pool.query(toPg(sql), params as unknown[] as any[]);
+  }
+  close() {
+    return this.pool.end();
+  }
+}
+
+const pgSqlCache = new Map<string, string>();
+
+/** Rewrite `?`/`?N` placeholders to `$n`, leaving single-quoted literals alone. */
+function toPg(sql: string): string {
+  const cached = pgSqlCache.get(sql);
+  if (cached) return cached;
+  let out = '';
+  let n = 0;
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    if (ch === "'") {
+      // Copy the string literal verbatim ('' is an escaped quote).
+      out += ch;
+      while (++i < sql.length) {
+        out += sql[i];
+        if (sql[i] === "'") {
+          if (sql[i + 1] === "'") out += sql[++i];
+          else break;
+        }
+      }
+    } else if (ch === '?') {
+      let digits = '';
+      while (/[0-9]/.test(sql[i + 1] ?? '')) digits += sql[++i];
+      if (digits) {
+        out += `$${digits}`;
+        n = Math.max(n, Number(digits)); // SQLite: bare ? continues after the highest ?N
+      } else {
+        out += `$${++n}`;
+      }
+    } else {
+      out += ch;
+    }
+  }
+  pgSqlCache.set(sql, out);
+  return out;
+}
 
 type Row = Record<string, unknown>;
 
@@ -10,21 +67,22 @@ const AUDITED = new Set(['users', 'vendors', 'routines', 'visits', 'tasks', 'rec
 
 const bindable = (v: unknown) => (v === true ? 1 : v === false ? 0 : v === undefined ? null : v);
 
-export async function all<T>(db: D1Database, sql: string, ...params: unknown[]): Promise<T[]> {
-  const { results } = await db.prepare(sql).bind(...params.map(bindable)).all<T>();
-  return results;
+export async function all<T>(db: Db, sql: string, ...params: unknown[]): Promise<T[]> {
+  const { rows } = await db.query(sql, params.map(bindable));
+  return rows as T[];
 }
 
-export async function first<T>(db: D1Database, sql: string, ...params: unknown[]): Promise<T | null> {
-  return db.prepare(sql).bind(...params.map(bindable)).first<T>();
+export async function first<T>(db: Db, sql: string, ...params: unknown[]): Promise<T | null> {
+  const { rows } = await db.query(sql, params.map(bindable));
+  return (rows[0] as T) ?? null;
 }
 
-export async function run(db: D1Database, sql: string, ...params: unknown[]) {
-  return db.prepare(sql).bind(...params.map(bindable)).run();
+export async function run(db: Db, sql: string, ...params: unknown[]) {
+  return db.query(sql, params.map(bindable));
 }
 
 async function audit(
-  db: D1Database,
+  db: Db,
   table: string,
   recordId: string | null,
   action: 'INSERT' | 'UPDATE' | 'DELETE',
@@ -46,7 +104,7 @@ async function audit(
 }
 
 /** Insert a row (id/timestamps filled in when absent) and audit it. Returns the stored row. */
-export async function insertRow<T = Row>(db: D1Database, table: string, row: Row, actorId: string | null): Promise<T> {
+export async function insertRow<T = Row>(db: Db, table: string, row: Row, actorId: string | null): Promise<T> {
   const full: Row = { id: uid(), ...row };
   if (TIMESTAMPED.has(table)) {
     full.created_at = full.created_at ?? now();
@@ -63,7 +121,7 @@ export async function insertRow<T = Row>(db: D1Database, table: string, row: Row
 }
 
 /** Update a row by id and audit old/new. Throws if the row does not exist. */
-export async function updateRow<T = Row>(db: D1Database, table: string, id: string, patch: Row, actorId: string | null): Promise<T> {
+export async function updateRow<T = Row>(db: Db, table: string, id: string, patch: Row, actorId: string | null): Promise<T> {
   const old = await first<Row>(db, `SELECT * FROM ${table} WHERE id = ?`, id);
   if (!old) throw new Error(`${table} row not found`);
   const changes: Row = { ...patch };
@@ -80,7 +138,7 @@ export async function updateRow<T = Row>(db: D1Database, table: string, id: stri
 }
 
 /** Delete a row by id and audit it. No-op if the row does not exist. */
-export async function deleteRow(db: D1Database, table: string, id: string, actorId: string | null) {
+export async function deleteRow(db: Db, table: string, id: string, actorId: string | null) {
   const old = await first<Row>(db, `SELECT * FROM ${table} WHERE id = ?`, id);
   if (!old) return;
   await run(db, `DELETE FROM ${table} WHERE id = ?`, id);

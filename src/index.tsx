@@ -1,8 +1,7 @@
 import { Hono } from 'hono';
 import { requireAuth, requireRole, setImpersonation, flash, hashPassword, verifyPassword } from './auth';
 import { first, updateRow } from './db';
-import { generateVisits, expireTasks, sweepCloseTasks } from './workflow';
-import type { App, Env, User } from './types';
+import type { App, User } from './types';
 
 import authRoutes from './routes/auth';
 import dashboard from './routes/dashboard';
@@ -71,19 +70,4 @@ app.onError((err, c) => {
   return c.text(err instanceof Error ? err.message : 'Something went wrong', 500);
 });
 
-export default {
-  fetch: app.fetch,
-
-  /** Daily cron (06:00 UTC): create upcoming visits, then flip past-due tasks to overdue. */
-  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(
-      (async () => {
-        const generated = await generateVisits(env.DB);
-        const expired = await expireTasks(env.DB);
-        await sweepCloseTasks(env.DB);
-        console.log(`cron: created ${generated.created.length} visit(s), marked ${expired} task(s) overdue`,
-          generated.errors.length ? { errors: generated.errors } : '');
-      })()
-    );
-  },
-};
+export default app;

@@ -1,3 +1,6 @@
+import type { Db } from './db';
+import type { Bucket } from './storage';
+
 export type UserRole = 'admin' | 'vendor_coordinator' | 'maintenance_engineer' | 'technical_engineer';
 
 export type VisitStatus =
@@ -155,8 +158,8 @@ export interface VisitReport {
 }
 
 export type Env = {
-  DB: D1Database;
-  REPORTS: R2Bucket;
+  DB: Db;
+  REPORTS: Bucket;
 };
 
 /** Hono context bindings + per-request auth variables. */
