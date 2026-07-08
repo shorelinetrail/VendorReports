@@ -1,10 +1,9 @@
 import { Hono } from 'hono';
-import type { Context } from 'hono';
-import { all, first, updateRow, now } from '../db';
+import { all, first, updateRow } from '../db';
 import { fmtDate, todayStr } from '../dates';
 import { activeUsers, flash } from '../auth';
-import { page, Card, PageHeader, EmptyState, StatCard, taskBadge, isTaskOverdue, Icon, IconAction, IconModalBtn, Modal, ModalButtons, Field } from '../ui';
-import { isAdmin, ROLE_LABELS, TASK_TYPE_LABELS, type App, type Task, type TaskStatus, type TaskType, type Visit } from '../types';
+import { page, Card, PageHeader, EmptyState, StatCard, taskBadge, isTaskOverdue, Icon, IconModalBtn, Modal, ModalButtons, Field } from '../ui';
+import { isAdmin, ROLE_LABELS, TASK_TYPE_LABELS, type App, type Task, type Visit } from '../types';
 
 const routes = new Hono<App>();
 
@@ -13,7 +12,6 @@ type TaskRow = Task & { plan_number: string; vendor_name: string; assigned_to_na
 const FILTERS: { value: string; label: string }[] = [
   { value: 'open', label: 'All open' },
   { value: 'pending', label: 'Pending' },
-  { value: 'in_progress', label: 'In progress' },
   { value: 'overdue', label: 'Overdue' },
   { value: 'completed', label: 'Completed' },
   { value: 'cancelled', label: 'Cancelled' },
@@ -42,8 +40,7 @@ routes.get('/', async (c) => {
 
   const overdue = (t: TaskRow) => isTaskOverdue(t.status, t.due_date);
   const counts = {
-    pending: tasks.filter((t) => t.status === 'pending' && !overdue(t)).length,
-    in_progress: tasks.filter((t) => t.status === 'in_progress' && !overdue(t)).length,
+    pending: tasks.filter((t) => ['pending', 'in_progress'].includes(t.status) && !overdue(t)).length,
     overdue: tasks.filter(overdue).length,
     completed: tasks.filter((t) => t.status === 'completed').length,
   };
@@ -67,7 +64,6 @@ routes.get('/', async (c) => {
 
       <div class="stats">
         <StatCard label="Pending" value={counts.pending} href={query('pending')} icon="clock" tone="amber" />
-        <StatCard label="In Progress" value={counts.in_progress} href={query('in_progress')} icon="clock" tone="blue" />
         <StatCard label="Overdue" value={counts.overdue} href={query('overdue')} icon="alert" tone="red" />
         <StatCard label="Completed" value={counts.completed} href={query('completed')} icon="check" tone="green" />
       </div>
@@ -96,8 +92,6 @@ routes.get('/', async (c) => {
               </thead>
               <tbody>
                 {visible.map((t) => {
-                  const mine = t.assigned_to_id === user.id || isAdmin(user);
-                  const open = ['pending', 'in_progress', 'overdue'].includes(t.status);
                   return (
                     <tr data-href={`/visits/${t.visit_id}`}>
                       <td>
@@ -113,12 +107,6 @@ routes.get('/', async (c) => {
                       <td>{taskBadge(t.status, t.due_date)}</td>
                       <td class="actions">
                         <a class="btn btn--sm btn--icon" href={`/visits/${t.visit_id}`} title="Open visit" aria-label="Open visit"><Icon name="eye" size={15} /></a>
-                        {mine && open && t.status !== 'in_progress' && (
-                          <IconAction action={`/tasks/${t.id}/start`} icon="play" label="Start task" />
-                        )}
-                        {mine && open && (
-                          <IconAction action={`/tasks/${t.id}/complete`} icon="tick" label="Complete task" class="btn--green" />
-                        )}
                         {canReassign(t) && (
                           <IconModalBtn modal={`reassign-${t.id}`} icon="users" label="Reassign task" />
                         )}
@@ -172,25 +160,8 @@ routes.post('/:id/reassign', async (c) => {
   return c.redirect('/tasks');
 });
 
-async function transition(c: Context<App, '/:id/start' | '/:id/complete'>, allowed: TaskStatus[], patch: Record<string, unknown>, message: string) {
-  const user = c.get('user');
-  const task = await first<Task>(c.env.DB, 'SELECT * FROM tasks WHERE id = ?', c.req.param('id'));
-  const back = c.req.header('referer')?.includes('/visits/') ? `/visits/${task?.visit_id}` : '/tasks';
-  if (!task || (task.assigned_to_id !== user.id && !isAdmin(user))) {
-    flash(c, 'You can only update tasks assigned to you.', 'err');
-    return c.redirect(back);
-  }
-  if (!allowed.includes(task.status)) {
-    flash(c, 'This task can no longer be updated.', 'err');
-    return c.redirect(back);
-  }
-  await updateRow(c.env.DB, 'tasks', task.id, patch, c.get('realUser').id);
-  flash(c, message);
-  return c.redirect(back);
-}
-
-routes.post('/:id/start', (c) => transition(c, ['pending', 'overdue'], { status: 'in_progress' }, 'Task started.'));
-routes.post('/:id/complete', (c) =>
-  transition(c, ['pending', 'in_progress', 'overdue'], { status: 'completed', completed_at: now() }, 'Task completed.'));
+// Tasks are worked and completed through their real action on the visit page
+// (confirm, upload, review, close…) - the list deliberately offers no
+// start/complete shortcuts, which would let workflow state drift.
 
 export default routes;
